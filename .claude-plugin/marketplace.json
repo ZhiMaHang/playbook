@@ -8,7 +8,7 @@
     {
       "name": "playbook",
       "source": "./",
-      "description": "智码航提示词工具集。首个技能 prompt-optimizer:三步交互(消歧→两道选择题→纯拼接)把一句模糊的话整理成可直接发送的提示词,不扩写、不编造;成品可一键交给当前会话直接执行。"
+      "description": "智码航提示词工具集,全程零猜测。prompt-optimizer:消歧→两道选择题→纯拼接;five-sentence-brief:五句话任务简报。成品均可一键交给当前会话直接执行。"
     }
   ]
 }
