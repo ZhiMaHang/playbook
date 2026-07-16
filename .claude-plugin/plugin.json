@@ -1,0 +1,9 @@
+{
+  "name": "playbook",
+  "version": "0.5.0",
+  "description": "智码航提示词工具集。首个技能 prompt-optimizer:三步交互(消歧→两道选择题→纯拼接)把一句模糊的话整理成可直接发送的提示词,不扩写、不编造;成品可一键交给当前会话直接执行。",
+  "author": {
+    "name": "ZhiMaHang"
+  },
+  "homepage": "https://github.com/ZhiMaHang/playbook"
+}
