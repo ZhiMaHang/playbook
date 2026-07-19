@@ -8,7 +8,7 @@
     {
       "name": "playbook",
       "source": "./",
-      "description": "智码航提示词工具集,全程零猜测。prompt-optimizer:消歧→两道选择题→纯拼接;five-sentence-brief:五句话任务简报。成品均可一键交给当前会话直接执行。"
+      "description": "智码航提示词工具集,全程零猜测。prompt-optimizer:消歧→两道选择题→纯拼接;five-sentence-brief:五句话任务简报;four-part-prompt:目标/背景/输出要求/边界约束四段式提示词。成品均可一键交给当前会话直接执行。"
     }
   ]
 }

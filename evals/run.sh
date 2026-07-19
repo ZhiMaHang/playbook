@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# prompt-optimizer 首轮行为回归:对每个用例无头跑一次真插件,再用 haiku 按 rubric 判分。
+# playbook 技能首轮行为回归(prompt-optimizer / four-part-prompt):对每个用例无头跑一次真插件,再用 haiku 按 rubric 判分。
 # 用法: bash evals/run.sh [用例名过滤子串]
-# 局限:只测第一轮回复(消歧/两道题/直接拼接的分流);多轮交互(回"都行"、拒答、部分作答)仍需手测。
+# 局限:只测第一轮回复(消歧/两道题/只问空槽/直接拼接的分流);多轮交互(回"都行"、拒答、部分作答)仍需手测。
 set -uo pipefail
 cd "$(dirname "$0")/.."
 PLUGIN_DIR="$(pwd)"

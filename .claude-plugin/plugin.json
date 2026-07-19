@@ -1,7 +1,7 @@
 {
   "name": "playbook",
-  "version": "0.6.0",
-  "description": "智码航提示词工具集,全程零猜测。prompt-optimizer:消歧→两道选择题→纯拼接,把一句模糊的话理成可直接发送的提示词;five-sentence-brief:按五句话(我要做/给谁用/解决什么问题/基于资料/交付成)把一件要办的事补全成任务简报。成品均可一键交给当前会话直接执行。",
+  "version": "0.7.0",
+  "description": "智码航提示词工具集,全程零猜测。prompt-optimizer:消歧→两道选择题→纯拼接,把一句模糊的话理成可直接发送的提示词;five-sentence-brief:按五句话(我要做/给谁用/解决什么问题/基于资料/交付成)把一件要办的事补全成任务简报;four-part-prompt:按四段(目标/背景/输出要求/边界约束)把要交办的事补全成结构化提示词。成品均可一键交给当前会话直接执行。",
   "author": {
     "name": "ZhiMaHang"
   },
