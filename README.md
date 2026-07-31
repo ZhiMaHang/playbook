@@ -59,13 +59,20 @@
 3. **只改代码层**:metadata、JSON-LD、sitemap、llms.txt、内链、埋点等;部署、投放、第三方发布一律列待办;
 4. **固定结构报告**:自动完成 / 等你确认 / 需人工 / 清单之外的发现 / 已达标项。
 
-**首次使用需填站点档案**:
+**首次使用需填站点档案**——⚠️ **必须放在插件目录之外**:
 
 ```
-cp skills/marketing/references/sites.md skills/marketing/references/sites.local.md
+mkdir -p ~/.config/zmh-marketing
+cp skills/marketing/references/sites.md ~/.config/zmh-marketing/sites.local.md
+chmod 600 ~/.config/zmh-marketing/sites.local.md
 ```
 
-按模板填入你的站点仓库路径、线上 URL、部署方式、收录渠道等。`*.local.md` 已在 .gitignore 中,服务器地址、衡量 ID、密钥位置这类信息只写在 local 文件里,不会进版本库。
+按模板填入你的站点仓库路径、线上 URL、部署方式、收录渠道等。
+
+技能按 `~/.config/zmh-marketing/sites.local.md` → 本技能目录 `references/sites.local.md` 的顺序取第一个存在的。
+**别放技能目录里**:装成插件后技能是从 `~/.claude/plugins/cache/<插件>/<版本>/` 加载的,而 `*.local.md`
+被 .gitignore 挡在版本库外、永远进不了缓存,放那儿等于没放;就算从仓库直接跑,下次 `plugin update`
+换版本目录也会连它一起丢。服务器地址、衡量 ID、密钥位置这类信息只写在 local 文件里,不会进版本库。
 
 ## 安装
 
