@@ -1,10 +1,14 @@
 # 站点档案（模板）
 
-**本文件是空模板。** 首次使用本技能前，复制一份为 `sites.local.md` 并填入你自己的站点信息——技能优先读 `sites.local.md`，它已被 gitignore，不会进版本库。
+**本文件是空模板。** 首次使用本技能前，复制一份并填入你自己的站点信息。**放到插件目录之外**，否则插件升级时会连同缓存一起被替换掉：
 
 ```
-cp references/sites.md references/sites.local.md
+mkdir -p ~/.config/zmh-marketing
+cp references/sites.md ~/.config/zmh-marketing/sites.local.md
+chmod 600 ~/.config/zmh-marketing/sites.local.md   # 里面通常有服务器地址与密钥位置
 ```
+
+技能按 `~/.config/zmh-marketing/sites.local.md` → 本目录 `sites.local.md` 的顺序取第一个存在的；两者都被 gitignore，不会进版本库。
 
 档案与仓库实际不符时以仓库为准，并回来修正本文件。
 
