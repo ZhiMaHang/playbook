@@ -50,6 +50,23 @@
 
 配置上面那个技能的凭据:火山 API 密钥、可选豆包 TTS、素材服务器,写入 `~/.config/zmh-dhv/env`(600),用假 task_id 做零成本连通性验证。首次使用或换钥时跑一次即可。
 
+### marketing
+
+对营销站按 SEO/GEO/SEM 任务清单做扫描与整改:
+
+1. **双向核对**:线上 `curl` 实态 + 仓库源码,每条结论带证据(URL+状态码、文件路径:行号);
+2. **四类判定**:已达标 / 可自动整改 / 需人工 / 不适用;
+3. **只改代码层**:metadata、JSON-LD、sitemap、llms.txt、内链、埋点等;部署、投放、第三方发布一律列待办;
+4. **固定结构报告**:自动完成 / 等你确认 / 需人工 / 清单之外的发现 / 已达标项。
+
+**首次使用需填站点档案**:
+
+```
+cp skills/marketing/references/sites.md skills/marketing/references/sites.local.md
+```
+
+按模板填入你的站点仓库路径、线上 URL、部署方式、收录渠道等。`*.local.md` 已在 .gitignore 中,服务器地址、衡量 ID、密钥位置这类信息只写在 local 文件里,不会进版本库。
+
 ## 安装
 
 ```

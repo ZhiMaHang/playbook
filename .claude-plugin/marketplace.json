@@ -1,6 +1,6 @@
 {
   "name": "playbook",
-  "description": "智码航工具集(Claude Code 插件市场):提示词三件套 + 数字人视频两件套",
+  "description": "智码航工具集(Claude Code 插件市场):提示词三件套 + 数字人视频两件套 + 营销站扫描",
   "owner": {
     "name": "ZhiMaHang"
   },
@@ -8,7 +8,7 @@
     {
       "name": "playbook",
       "source": "./",
-      "description": "智码航工具集,全程零猜测。提示词三件套:prompt-optimizer 理顺一句话、five-sentence-brief 五句话任务简报、four-part-prompt 四段式结构化提示词;数字人视频两件套:digital-human-video 产出口播视频(确认成本后才花钱)、digital-human-video-init 配置密钥。"
+      "description": "智码航工具集,全程零猜测。提示词三件套(prompt-optimizer/five-sentence-brief/four-part-prompt)、数字人视频两件套(digital-human-video/-init)、营销站 SEO/GEO/SEM 扫描整改(marketing)。"
     }
   ]
 }

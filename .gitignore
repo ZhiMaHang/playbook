@@ -1,3 +1,4 @@
 evals/cases/*/last-output.txt
 __pycache__/
 *.pyc
+skills/*/references/*.local.md
