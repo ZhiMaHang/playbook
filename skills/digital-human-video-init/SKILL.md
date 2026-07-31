@@ -15,6 +15,7 @@ description: 初始化数字人视频技能的凭据与配置:收集火山引擎
    - `TTS_VOICE`(可选):豆包音色代号,默认 zh_female_shuangkuaisisi_moon_bigtts。
    - `ZMH_ASSET_SSH` / `ZMH_ASSET_DIR` / `ZMH_ASSET_URLBASE`(必填):素材临时上传的服务器与公网 URL 前缀(即梦 API 只收公网 URL)。默认 SSH 目标 `zmh`;目录与 URL 前缀须与用户确认真实站点路径,不得瞎猜。
    - `AIGC_PRODUCER`(可选):隐式 AI 标识里的服务商标识,默认 zhimahang。
+   - `BRAND_CTA`(可选):口播结尾的固定引导语,如「搜 XX」。不配则制作技能每次问你要一句(或不加),不会自行编造。
 
 2. **写配置**:写入 `~/.config/zmh-dhv/env`,`chmod 600`。**密钥值不回显、不写入任何 git 仓、不进对话记录以外的文件**。已有文件先备份为 `env.bak`。
 
