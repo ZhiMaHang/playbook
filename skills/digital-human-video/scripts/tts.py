@@ -47,10 +47,24 @@ def doubao_tts(text, out_wav, voice):
         sys.exit(f"豆包TTS失败: {resp.get('code')} {resp.get('message')}")
     pathlib.Path(out_wav).write_bytes(base64.b64decode(resp["data"]))
 
-def edge_tts(text, out_wav, voice):
+PROXY_VARS = ("http_proxy", "https_proxy", "all_proxy",
+              "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+
+def edge_tts(text, out_wav, voice, no_proxy=False):
+    """edge-tts 合成。no_proxy=True 时剥掉代理环境变量再跑。
+
+    2026-08-02 实测:本机代理会拦 speech.platform.bing.com,带代理必失败、
+    剥掉就通。但别的网络环境可能反过来(必须走代理才出得去),所以策略是
+    「先按现状跑,失败再剥代理重试一次」,而不是无条件剥。
+    """
     mp3 = out_wav.replace(".wav", ".mp3")
+    env = os.environ.copy()
+    if no_proxy:
+        for v in PROXY_VARS:
+            env.pop(v, None)
+        env["NO_PROXY"] = "*"
     subprocess.run([sys.executable, "-m", "edge_tts", "--voice", voice,
-                    "--text", text, "--write-media", mp3], check=True)
+                    "--text", text, "--write-media", mp3], check=True, env=env)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", mp3,
                     "-ar", "44100", "-ac", "1", out_wav], check=True)
     os.remove(mp3)
@@ -64,12 +78,27 @@ def say_tts(text, out_wav, voice="Tingting"):
     os.remove(aiff)
 
 def edge_or_say(text, out_wav, voice):
+    """edge-tts →(剥代理重试)→ macOS say。
+
+    降级到 say 是**最后手段**:macOS 多数中文音色其实没随系统安装(实测
+    Eddy/Reed/Rocko/Grandpa 产出 0 字节),真正可用的只有女声 Tingting——
+    形象是男性时会造成明显的声画不符,这种片子不该直接发。故降级时显式警告。
+    """
     try:
         edge_tts(text, out_wav, voice)
+        return
     except subprocess.CalledProcessError:
-        say_voice = os.environ.get("SAY_VOICE", "Tingting")
-        print(f"  edge-tts 不可达,降级 macOS say(voice={say_voice})", file=sys.stderr)
-        say_tts(text, out_wav, say_voice)
+        pass
+    try:
+        edge_tts(text, out_wav, voice, no_proxy=True)
+        print("  edge-tts 带代理失败,剥代理后成功", file=sys.stderr)
+        return
+    except subprocess.CalledProcessError:
+        pass
+    say_voice = os.environ.get("SAY_VOICE", "Tingting")
+    print(f"  ⚠️ edge-tts 两次均失败,降级 macOS say(voice={say_voice})。"
+          f"注意音色可能与人物性别不符,正式片请勿直接使用", file=sys.stderr)
+    say_tts(text, out_wav, say_voice)
 
 def main():
     p = argparse.ArgumentParser()
@@ -80,7 +109,7 @@ def main():
     segs = parse_segments(open(a.script, encoding="utf-8").read())
     use_doubao = bool(os.environ.get("TTS_APPID") and os.environ.get("TTS_TOKEN"))
     voice = a.voice or (os.environ.get("TTS_VOICE", "zh_female_shuangkuaisisi_moon_bigtts")
-                        if use_doubao else "zh-CN-XiaoxiaoNeural")
+                        if use_doubao else os.environ.get("EDGE_VOICE", "zh-CN-XiaoxiaoNeural"))
     print(f"引擎={'豆包TTS' if use_doubao else 'edge-tts(降级)'} voice={voice} 共{len(segs)}段")
     for i, text in enumerate(segs, 1):
         wav = os.path.join(a.outdir, f"seg_{i:02d}.wav")
