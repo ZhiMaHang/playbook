@@ -13,7 +13,7 @@ def load_env():
     for line in open(CONF):
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1); os.environ.setdefault(k, v)
+            k, v = line.split("=", 1); os.environ.setdefault(k, v.strip().strip('"').strip("'"))
 
 def main():
     load_env()
@@ -26,7 +26,7 @@ def main():
     spec = importlib.util.spec_from_file_location("jimeng_dh", os.path.abspath(dh_path))
     dh = importlib.util.module_from_spec(spec); spec.loader.exec_module(dh)
 
-    r = dh.signed_post("CVGetResult", {"req_key": dh.REQ_KEY, "task_id": "0"})
+    r = dh.signed_post("CVGetResult", {"req_key": dh.req_key(), "task_id": "0"})
     code, msg = r.get("code"), str(r.get("message", ""))
     meta = str(r.get("ResponseMetadata", {}).get("Error", {}) if isinstance(r.get("ResponseMetadata"), dict) else "")
     blob = f"{code} {msg} {meta}"
@@ -35,7 +35,7 @@ def main():
     if any(s in low for s in ("signature", "credential", "accesskey", "authentication", "unauthorized")):
         print("❌ 鉴权失败:AK/SK 不对或已失效"); sys.exit(2)
     if any(s in low for s in ("not open", "未开通", "no permission", "denied", "not activated", "50401")):
-        print("⚠️ 密钥有效,但服务疑似未开通:去控制台开通即梦AI「数字人快速模式」"); sys.exit(3)
+        print(f"⚠️ 鉴权通过,但 req_key <{dh.req_key()}> 未对本账号开放。\n   这不等于「服务没开通」——先去控制台「智能视觉 → 即梦AI」确认已开通的 SKU 名(如 OmniHuman1.5),\n   再在 ~/.config/zmh-dhv/env 里设 DHV_REQ_KEY=<对应 req_key>。\n   区分:50200=req_key 名不存在 / 50400=名有效但未开放 / 10000=通。"); sys.exit(3)
     if code is not None:
         print("✅ 鉴权通过、服务可达(业务层报 task 不存在属预期)"); sys.exit(0)
     print(f"⚠️ 无法判读,原始响应: {json.dumps(r, ensure_ascii=False)[:400]}"); sys.exit(4)

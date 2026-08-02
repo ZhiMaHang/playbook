@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
-"""即梦AI·数字人快速模式(OmniHuman1.0) — 提交+轮询+下载。
+"""即梦AI·数字人(OmniHuman) — 提交+轮询+下载。
 文档: docs.volcengine.com/docs/85621/1810471
 鉴权: 火山 OpenAPI HMAC-SHA256 签名(host=visual.volcengineapi.com, region=cn-north-1, service=cv)
 用法: VOLC_AK=xx VOLC_SK=xx python3 jimeng_dh.py --image <公网图URL> --audio <公网音频URL> --out seg1.mp4
 注意: 计费 1 元/秒(按产出视频时长),并发 1;调用前须经用户确认成本。
+
+req_key 与控制台开通的 SKU 必须对应,否则 CVSubmitTask/CVGetResult 一律回
+`50400 Access Denied`——这个错**不是**鉴权失败也**不是**没开通服务,是「这个
+req_key 对应的能力没对本账号开放」。三个码可以互相区分(2026-08-02 实测):
+  50200 Invalid Input Parameters: req_key  → req_key 名字根本不存在
+  50400 Access Denied                      → 名字有效,但该能力未对本账号开放
+  10000 Success                            → 通了
+排查时拿一个已知开通的 req_key 做对照探针即可定位,别去动 IAM 权限。
+默认值对应控制台「即梦AI → OmniHuman1.5」;若账号开的是别的 SKU,在
+~/.config/zmh-dhv/env 里加一行 DHV_REQ_KEY=<你的 req_key> 覆盖,不必改代码。
 """
 import argparse, datetime, hashlib, hmac, json, os, sys, time, urllib.request
 
 HOST, REGION, SERVICE = "visual.volcengineapi.com", "cn-north-1", "cv"
-REQ_KEY = "jimeng_realman_avatar_picture_omni_v2"
+DEFAULT_REQ_KEY = "jimeng_realman_avatar_picture_omni_v15"
+
+
+def req_key():
+    """控制台 SKU 对应的 req_key;可用 DHV_REQ_KEY 覆盖(见文件头说明)。"""
+    return os.environ.get("DHV_REQ_KEY") or DEFAULT_REQ_KEY
 CONF = os.path.expanduser("~/.config/zmh-dhv/env")
 
 def load_env():
@@ -58,7 +73,7 @@ def main():
     p.add_argument("--producer", default=os.environ.get("AIGC_PRODUCER", "zhimahang"))
     args = p.parse_args()
 
-    r = signed_post("CVSubmitTask", {"req_key": REQ_KEY, "image_url": args.image, "audio_url": args.audio})
+    r = signed_post("CVSubmitTask", {"req_key": req_key(), "image_url": args.image, "audio_url": args.audio})
     if r.get("code") != 10000:
         sys.exit(f"提交失败 code={r.get('code')} msg={r.get('message')} request_id={r.get('request_id')}")
     task_id = r["data"]["task_id"]
@@ -71,7 +86,7 @@ def main():
                                      "propagate_id": f"dhv-{task_id}"}})
     while True:
         time.sleep(20)
-        q = signed_post("CVGetResult", {"req_key": REQ_KEY, "task_id": task_id, "req_json": aigc})
+        q = signed_post("CVGetResult", {"req_key": req_key(), "task_id": task_id, "req_json": aigc})
         if q.get("code") != 10000:
             sys.exit(f"查询失败 code={q.get('code')} msg={q.get('message')} request_id={q.get('request_id')}")
         st = q["data"]["status"]
