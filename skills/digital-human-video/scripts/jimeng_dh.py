@@ -68,16 +68,31 @@ def signed_post(action, body: dict):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--image", required=True); p.add_argument("--audio", required=True)
+    p.add_argument("--image"); p.add_argument("--audio")
     p.add_argument("--out", required=True)
+    p.add_argument("--resume", help="已提交任务的 task_id;跳过提交直接轮询(不重复计费)")
     p.add_argument("--producer", default=os.environ.get("AIGC_PRODUCER", "zhimahang"))
     args = p.parse_args()
 
-    r = signed_post("CVSubmitTask", {"req_key": req_key(), "image_url": args.image, "audio_url": args.audio})
-    if r.get("code") != 10000:
-        sys.exit(f"提交失败 code={r.get('code')} msg={r.get('message')} request_id={r.get('request_id')}")
-    task_id = r["data"]["task_id"]
-    print(f"task_id={task_id} 已提交,RTF≈20,15s 段约 5 分钟…")
+    # task_id 落盘:提交后进程若被杀(超时/Ctrl-C),任务仍在服务端跑、仍占并发槽、
+    # 仍计费,但 task_id 只在 stdout 里就永久丢了——只能干等槽位释放再重交一次,
+    # 白花一次钱。故提交成功立刻写 sidecar,并在启动时自动续跑。
+    sidecar = args.out + ".task"
+    task_id = args.resume
+    if not task_id and os.path.exists(sidecar):
+        task_id = open(sidecar).read().strip() or None
+        if task_id:
+            print(f"发现未完成任务 {task_id}(来自 {sidecar}),直接续跑,不重复提交")
+    if not task_id:
+        if not (args.image and args.audio):
+            sys.exit("首次提交需要 --image 与 --audio(续跑用 --resume <task_id>)")
+        r = signed_post("CVSubmitTask", {"req_key": req_key(), "image_url": args.image, "audio_url": args.audio})
+        if r.get("code") != 10000:
+            sys.exit(f"提交失败 code={r.get('code')} msg={r.get('message')} request_id={r.get('request_id')}")
+        task_id = r["data"]["task_id"]
+        with open(sidecar, "w") as f:
+            f.write(task_id)
+        print(f"task_id={task_id} 已提交(已存 {sidecar}),RTF≈20,15s 段约 5 分钟…")
 
     # 隐式标识(《人工智能生成合成内容标识办法》)经查询接口 req_json 注入
     aigc = json.dumps({"aigc_meta": {"content_producer": args.producer,
@@ -96,6 +111,7 @@ def main():
             if not url: sys.exit(f"done 但无 video_url: {q}")
             print(f"  aigc_meta_tagged={q['data'].get('aigc_meta_tagged')}")
             urllib.request.urlretrieve(url, args.out)   # URL 仅 1 小时有效,立即落盘
+            if os.path.exists(sidecar): os.remove(sidecar)   # 完成即清,免得下次误续跑
             print(f"已下载 → {args.out}"); return
         if st in ("not_found", "expired"):
             sys.exit(f"任务异常 status={st}")
