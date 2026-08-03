@@ -125,6 +125,14 @@ scripts/make_portrait.sh check out.png          # 人景协调自检(色温/画�
 4. **成本按总秒数线性算**:数字人 1 元/秒,拆成 3 段 45 秒就是 ¥45,不因为分段而变便宜。
    成本表必须报**总时长与总金额**,不能只报单段。
 5. 中段若可以用图卡承载(数据、清单、对比),优先用图卡——零成本,且清单类信息看比听记得住。
+   **有先后/层级关系的内容,用 `make_diagram.py` 画框架图,别用 `make_card.sh` 罗列文字**:
+   五个角色摆成五行字,观众只看到一张清单;画成「想法→产品→规模」的链路加两个贯穿角色,
+   观众看到的是一个结构。**同一张框架图分段 `--highlight` 不同节点**,能让观众跟着讲解
+   一步步建立心智模型,比每段换一张不相干的卡有效得多。
+
+   **框架图一律用代码画,不要用 AI 生成图**:AI 生成图里的中文几乎必错(缺笔画、造字、
+   串行),而框架图的信息全在文字上,错一个字整张图就废。代码画的字 100% 可控、可复现,
+   改词重画成本为零。AI 生成图适合做底纹与氛围,不适合承载文字信息。
 
 **语速**:由配置项 `TTS_RATE` 控制(edge-tts 的百分比增量,`+0%`=1.0x、`+50%`=1.5x;
 豆包与 macOS say 兜底会自动换算成各自的倍率)。短视频平台上 1.5 倍速通常比常速更抓人。
@@ -170,7 +178,10 @@ scripts/make_portrait.sh check out.png          # 人景协调自检(色温/画�
 ```bash
 cd "${CLAUDE_PLUGIN_ROOT}/skills/digital-human-video"   # 未装插件时为本技能所在目录
 python3 scripts/tts.py --script <确认稿.md> --outdir work/<项目名>/audio     # 按「## 段N」分段配音,报每段实际秒数
-scripts/make_card.sh work/<项目名>/card1.png "标题" "行1|行2|行3" "脚注"      # 图卡段逐张做
+scripts/make_card.sh work/<项目名>/card1.png "标题" "行1|行2|行3" "脚注"      # 纯文字图卡
+python3 scripts/make_diagram.py --out work/<项目名>/diag.png --title "五种角色" \
+  --chain "原型师|抓住第一个想法" "构建者|做成产品" "扩展者|放大十倍" \
+  --side "维护者|守住它" "收尾人|打磨" --stage "想法" "产品" "规模" --highlight 0 1   # 框架图(有结构关系时用)
 scripts/upload_asset.sh <人像图> work/<项目名>/audio/seg_01.wav ...          # 换公网 URL(仅数字人段音频需上传)
 python3 scripts/jimeng_dh.py --image <图URL> --audio <段URL> --out work/<项目名>/dh_XX.mp4 --confirmed   # 逐段,串行(并发 1),RTF≈20;--confirmed 仅在门 C 通过后加
 # 写 work/<项目名>/segments.txt(行格式: dh <mp4> - <字幕txt> / card <png> <wav> <字幕txt>)
