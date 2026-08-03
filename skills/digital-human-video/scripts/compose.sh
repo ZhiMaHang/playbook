@@ -2,6 +2,7 @@
 # 竖版成片合成(纯 overlay,不依赖 drawtext——本机 ffmpeg 无该滤镜):
 # 数字人段/图卡段 → 1080x1920 拼接 + PIL 字幕条 + 「内容由 AI 生成」角标(合规必带,不许去掉)
 # 用法: compose.sh <workdir> <out.mp4>
+# 注意: segments.txt 里的路径一律**相对 workdir**(脚本自己拼 $WORK/),写绝对路径会拼成两截。
 # 约定:<workdir>/segments.txt 每行一个片段:
 #   dh <数字人mp4> <配音wav|-> <字幕txt>    (- 表示用 mp4 自带音轨)
 #   card <底图png> <配音wav> <字幕txt>
@@ -18,7 +19,7 @@ while read -r kind a b c; do
   if [ "$kind" = "dh" ]; then
     # 480P 数字人置于画面上部,下留字幕区
     if [ "$b" = "-" ]; then AUD=(-map 0:a); EXTRA=(); else AUD=(-map 3:a); EXTRA=(-i "$WORK/$b"); fi
-    ffmpeg -nostdin -y -loglevel error -i "$WORK/$a" -i "$TMP/sub_$i.png" -i "$TMP/badge.png" "${EXTRA[@]}" \
+    ffmpeg -nostdin -y -loglevel error -i "$WORK/$a" -i "$TMP/sub_$i.png" -i "$TMP/badge.png" ${EXTRA[@]+"${EXTRA[@]}"} \
       -filter_complex "[0:v]scale=1080:-2,pad=1080:1920:0:200:color=0x101828[bg];[bg][1:v]overlay=0:H-h-140[s];[s][2:v]overlay=W-w-40:60[v]" \
       -map "[v]" "${AUD[@]}" -r 25 -c:v libx264 -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 "$SEG"
   else
