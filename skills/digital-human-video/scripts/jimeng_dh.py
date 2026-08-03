@@ -64,7 +64,13 @@ def signed_post(action, body: dict):
         with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
-        return json.loads(e.read())
+        raw = e.read()
+        try:
+            return json.loads(raw)
+        except ValueError:
+            # 非 JSON 错误体:多半是网关/参数层就被拒了,比如 URL 里带非 ASCII 字符。
+            # 直接把状态码与原文抛出来,别让调用方崩在 json 解析上、看不到真因。
+            sys.exit(f"HTTP {e.code} 非 JSON 响应(前 300 字):\n{raw[:300].decode('utf-8', 'replace')}")
 
 def main():
     p = argparse.ArgumentParser()
