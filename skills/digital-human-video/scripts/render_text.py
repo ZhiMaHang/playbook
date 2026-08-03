@@ -3,7 +3,7 @@
 用法:
   render_text.py card  <out.png> <标题> <正文行1|行2|行3> [脚注]   # 1080x1920 数据图卡
   render_text.py strip <out.png> <字幕文本>                        # 透明底字幕条(自动换行)
-  render_text.py badge <out.png>                                   # 「内容由 AI 制作」角标(合规必带)
+  render_text.py badge <out.png>                                   # 「视频由 AI 制作」角标(合规必带)
 """
 import sys
 from PIL import Image, ImageDraw, ImageFont
@@ -126,11 +126,11 @@ def strip(out, text):
 def badge(out):
     f = font(34)
     tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    w = int(tmp.textlength("内容由 AI 制作", font=f))
+    w = int(tmp.textlength("视频由 AI 制作", font=f))
     img = Image.new("RGBA", (w + 44, 60), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.rounded_rectangle([0, 0, w + 43, 59], radius=12, fill=(0, 0, 0, 95))
-    d.text((22, 9), "内容由 AI 制作", font=f, fill=(255, 255, 255, 220))
+    d.text((22, 9), "视频由 AI 制作", font=f, fill=(255, 255, 255, 220))
     img.save(out)
 
 if __name__ == "__main__":
