@@ -71,6 +71,8 @@ def main():
     p.add_argument("--image"); p.add_argument("--audio")
     p.add_argument("--out", required=True)
     p.add_argument("--resume", help="已提交任务的 task_id;跳过提交直接轮询(不重复计费)")
+    p.add_argument("--confirmed", action="store_true",
+                   help="已向用户报过成本并拿到确认。**没有这个开关不会提交计费任务**")
     p.add_argument("--producer", default=os.environ.get("AIGC_PRODUCER", "zhimahang"))
     args = p.parse_args()
 
@@ -86,6 +88,23 @@ def main():
     if not task_id:
         if not (args.image and args.audio):
             sys.exit("首次提交需要 --image 与 --audio(续跑用 --resume <task_id>)")
+        # 计费闸门:CVSubmitTask 是本技能唯一会花钱的调用。SKILL.md 的「确认门 C」是
+        # 写给执行者的纪律,纪律会漏,所以这里再加一道机器闸——没有 --confirmed 就不提交。
+        if not (args.confirmed or os.environ.get("DHV_CONFIRMED") == "1"):
+            dur = ""
+            try:
+                import subprocess as _sp
+                _local = args.audio if os.path.exists(args.audio) else None
+                if _local:
+                    _d = _sp.run(["ffprobe","-v","error","-show_entries","format=duration",
+                                  "-of","csv=p=0",_local], capture_output=True, text=True).stdout.strip()
+                    if _d: dur = f",本段音频 {float(_d):.1f} 秒 ≈ ¥{float(_d):.1f}"
+            except Exception:
+                pass
+            sys.exit("⛔ 未确认,不提交。\n"
+                     f"   这一步会调用 CVSubmitTask 并计费(数字人 1 元/秒{dur})。\n"
+                     "   请先把分镜与成本表报给用户、拿到明确的「确认/开做」,\n"
+                     "   再加 --confirmed 重跑(或设 DHV_CONFIRMED=1)。")
         r = signed_post("CVSubmitTask", {"req_key": req_key(), "image_url": args.image, "audio_url": args.audio})
         if r.get("code") != 10000:
             sys.exit(f"提交失败 code={r.get('code')} msg={r.get('message')} request_id={r.get('request_id')}")

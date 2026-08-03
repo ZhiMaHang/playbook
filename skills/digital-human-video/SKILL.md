@@ -135,6 +135,10 @@ scripts/make_portrait.sh check out.png          # 人景协调自检(色温/画�
 把完整分镜脚本 + 成本表报给用户,**明确拿到"确认/开做"才进入 ③**。用户改稿则改后再确认。
 **任何情况下未确认不得调用 CVSubmitTask**(那是唯一会计费的接口)。
 
+这道门有机器闸兜底:`jimeng_dh.py` 不带 `--confirmed` 会直接拒绝提交,并打印本段的
+预估费用。**纪律会漏,闸门不会**——所以别习惯性地把 `--confirmed` 写进脚本模板里,
+它应当是「已经拿到用户确认」这件事的证据,不是一个固定参数。
+
 ### ③ 制作(开始花钱)
 
 ```bash
@@ -142,7 +146,7 @@ cd "${CLAUDE_PLUGIN_ROOT}/skills/digital-human-video"   # 未装插件时为本�
 python3 scripts/tts.py --script <确认稿.md> --outdir work/<项目名>/audio     # 按「## 段N」分段配音,报每段实际秒数
 scripts/make_card.sh work/<项目名>/card1.png "标题" "行1|行2|行3" "脚注"      # 图卡段逐张做
 scripts/upload_asset.sh <人像图> work/<项目名>/audio/seg_01.wav ...          # 换公网 URL(仅数字人段音频需上传)
-python3 scripts/jimeng_dh.py --image <图URL> --audio <段URL> --out work/<项目名>/dh_XX.mp4   # 逐段,串行(并发 1),RTF≈20
+python3 scripts/jimeng_dh.py --image <图URL> --audio <段URL> --out work/<项目名>/dh_XX.mp4 --confirmed   # 逐段,串行(并发 1),RTF≈20;--confirmed 仅在门 C 通过后加
 # 写 work/<项目名>/segments.txt(行格式: dh <mp4> - <字幕txt> / card <png> <wav> <字幕txt>)
 scripts/compose.sh work/<项目名> work/<项目名>/成品.mp4
 ```
