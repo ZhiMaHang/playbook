@@ -69,7 +69,22 @@ def main():
 
     BOX_W, BOX_H, GAP = 720, 150, 78
     x0 = (W - BOX_W) // 2
-    y = 400
+    Y0 = 400
+    SIDE_EXTRA = 96          # 旁挂区之前的分隔线+标签占位
+    FOOT_H = 46 if a.footnote else 0
+
+    # 自动收缩:整张图的内容必须落在字幕安全线以上(_rt.sub_safe_top)。
+    # 节点一多就会顶进字幕条,而字幕是半透明的——压上去是透出鬼影,不是遮住。
+    # 所以这里按可用高度先压行距、再压框高,压不下才报错,绝不静默溢出。
+    avail = _rt.sub_safe_top() - Y0 - FOOT_H - 20
+    n, extra = len(nodes), (SIDE_EXTRA if a.side else 0)
+    while n * BOX_H + (n - 1) * GAP + extra > avail and GAP > 40:
+        GAP -= 2
+    while n * BOX_H + (n - 1) * GAP + extra > avail and BOX_H > 112:
+        BOX_H -= 2
+    if n * BOX_H + (n - 1) * GAP + extra > avail:
+        sys.exit(f"节点太多({n} 个)排不进字幕安全区,请拆成两张图分段高亮")
+    y = Y0
 
     for i, (kind, spec) in enumerate(nodes):
         name, _, desc = spec.partition("|")
@@ -77,7 +92,7 @@ def main():
         if kind == "side" and i == len(a.chain):
             # 旁挂区之前留一段额外空档:分隔线与标签要落在两块之间的空白里,
             # 直接用 GAP//2 会压在上一个方框的下边缘上(2026-08-03 实测踩到)。
-            y += 56
+            y += SIDE_EXTRA - 40
             _rt.center(d, y - 46, "贯穿全程", f_stage, DIM)
             d.line([(x0, y + 6), (x0 + BOX_W, y + 6)], fill=EDGEDIM, width=2)
             y += 40
@@ -97,9 +112,12 @@ def main():
         y = nxt
 
     if a.footnote:
-        _rt.center(d, H - 320, a.footnote, f_foot, DIM)
+        _rt.center(d, min(y - GAP + 30, _rt.sub_safe_top() - FOOT_H), a.footnote, f_foot, DIM)
     im.save(a.out)
-    print(f"框架图 → {a.out} ({W}x{H}, 高亮 {sorted(hi)})")
+    bottom = y - GAP + FOOT_H
+    print(f"框架图 → {a.out} ({W}x{H}, 高亮 {sorted(hi)}, 框高 {BOX_H} 行距 {GAP}, "
+          f"底边 y={bottom} / 字幕安全线 {_rt.sub_safe_top()} "
+          + ("✅" if bottom <= _rt.sub_safe_top() else "⚠️ 溢出"))
 
 
 if __name__ == "__main__":

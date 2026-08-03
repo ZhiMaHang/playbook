@@ -20,9 +20,53 @@ def font(size):
 
 import re
 
+# 「标签词：」整体成一个词元,不许从中间断开。
+# 口播稿里大量是「原型师：抓住第一个想法」这种「短标签 + 冒号 + 说明」句式,
+# 逐字换行会把标签拦腰截断成「扩展 / 者：」——2026-08-03 实测在成片里出现过。
+# 只吃冒号前 ≤5 个非标点字符,长了不粘,免得一个超长词元把整行挤爆。
+LABEL_RE = re.compile(r"[^\s。，、；：？！,.;:?!]{1,5}[：:]")
+
+
 def tokenize(text):
-    """CJK 逐字成词元;连续 ASCII(数字/字母/空格)整段成词元——换行不得拆断 '67'、'CSDN' 这类串。"""
-    return re.findall(r"[0-9A-Za-z][0-9A-Za-z .%]*[0-9A-Za-z%]|[0-9A-Za-z]|.", text)
+    """CJK 逐字成词元;连续 ASCII(数字/字母/空格)整段成词元——换行不得拆断 '67'、'CSDN'
+    这类串;「标签词：」也整体不拆(见 LABEL_RE)。"""
+    out, last = [], 0
+    for m in LABEL_RE.finditer(text):
+        if m.start() > last:
+            out += re.findall(r"[0-9A-Za-z][0-9A-Za-z .%]*[0-9A-Za-z%]|[0-9A-Za-z]|.", text[last:m.start()])
+        out.append(m.group())
+        last = m.end()
+    if last < len(text):
+        out += re.findall(r"[0-9A-Za-z][0-9A-Za-z .%]*[0-9A-Za-z%]|[0-9A-Za-z]|.", text[last:])
+    return out
+
+# 中日韩排版禁则(kinsoku):标点不能落在行首/行尾。
+# 2026-08-03 实测:字幕断行把「，」「。」「、」甩到行首,一眼就看出是机器排的。
+LEAD_FORBIDDEN = "。，、；：？！）〕】》」』〉”’…—·%,.;:?!)]}"   # 不能出现在行首
+TAIL_FORBIDDEN = "（〔【《「『〈“‘([{"                              # 不能出现在行尾
+
+
+def kinsoku(lines):
+    """行首/行尾禁则处理:把违规标点挪到相邻行。宽度上允许轻微超出——
+    标点比正文窄得多,挤一个进上一行几乎看不出,而标点落行首是一眼可见的排版错。"""
+    out = [l for l in lines if l]
+    # 行首禁则:把行首标点回吸到上一行末
+    i = 1
+    while i < len(out):
+        while out[i] and out[i][0] in LEAD_FORBIDDEN:
+            out[i - 1] += out[i][0]
+            out[i] = out[i][1:]
+        if not out[i]:
+            out.pop(i)
+        else:
+            i += 1
+    # 行尾禁则:把行末的开括号推到下一行首
+    for i in range(len(out) - 1):
+        while out[i] and out[i][-1] in TAIL_FORBIDDEN:
+            out[i + 1] = out[i][-1] + out[i + 1]
+            out[i] = out[i][:-1]
+    return [l for l in out if l]
+
 
 def wrap(draw, text, f, maxw):
     lines, cur = [], ""
@@ -32,7 +76,24 @@ def wrap(draw, text, f, maxw):
         else:
             cur += tok
     if cur: lines.append(cur)
-    return lines
+    return kinsoku(lines)
+
+# ── 底部字幕安全区(唯一真源,勿在别处再写魔数)──────────────────────
+# compose.sh 把字幕条贴在 overlay=0:H-h-140 → 底边恒为 y=1780,条高 h 随行数变。
+# 所有 1080x1920 的图(卡片/框架图)底部内容都必须停在 sub_safe_top() 以上。
+# **被字幕条盖住不是"看不见"**——条是 45% 半透明黑,盖住等于透出一层鬼影,
+# 比缺了这行字更难看。2026-08-03 实测:框架图脚注画在 y=1600、第五个节点底边
+# 到 y=1462,双双透在字幕里;当时 card() 把安全区写成注释里的「≈y1430」,
+# 后写的 make_diagram.py 既没看到也无从复用,于是原样再踩一遍。
+SUB_BOTTOM_Y = 1780
+SUB_LINE_H, SUB_PAD = 74, 26
+
+
+def sub_safe_top(max_lines=4):
+    """字幕最多 max_lines 行时字幕条的顶边 y。图上内容不得越过这条线。
+    默认 4 行:SKILL.md 规定每段文案 ≤65 字,52 号字在 960 宽下约 4 行封顶。"""
+    return SUB_BOTTOM_Y - (max_lines * SUB_LINE_H + SUB_PAD * 2)
+
 
 def center(draw, y, text, f, fill, W=1080):
     w = draw.textlength(text, font=f)
@@ -45,15 +106,15 @@ def card(out, title, lines, foot):
     y = 580
     for line in lines.split("|"):
         center(d, y, line.strip(), font(58), (255, 255, 255)); y += 130
-    # 脚注放正文下方留白区,避开底部字幕条(字幕条区域 ≈ y1430 以下)
-    center(d, max(y + 60, 1100), foot, font(32), (170, 178, 192))
+    # 脚注放正文下方留白区,且**必须**停在字幕安全线以上(见 sub_safe_top)
+    center(d, min(max(y + 60, 1100), sub_safe_top() - 46), foot, font(32), (170, 178, 192))
     img.save(out)
 
 def strip(out, text):
     f = font(52)
     tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
     lines = wrap(tmp, text.strip(), f, 960)
-    lh, pad = 74, 26
+    lh, pad = SUB_LINE_H, SUB_PAD
     H = len(lines) * lh + pad * 2
     img = Image.new("RGBA", (1080, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
