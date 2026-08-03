@@ -1,6 +1,6 @@
 #!/bin/bash
 # 竖版成片合成(纯 overlay,不依赖 drawtext——本机 ffmpeg 无该滤镜):
-# 数字人段/图卡段 → 1080x1920 拼接 + PIL 字幕条 + 「内容由 AI 生成」角标(合规必带,不许去掉)
+# 数字人段/图卡段 → 1080x1920 拼接 + PIL 字幕条 + 「内容由 AI 制作」角标(合规必带,不许去掉)
 # 用法: compose.sh <workdir> <out.mp4>
 # 注意: segments.txt 里的路径一律**相对 workdir**(脚本自己拼 $WORK/),写绝对路径会拼成两截。
 # 约定:<workdir>/segments.txt 每行一个片段:

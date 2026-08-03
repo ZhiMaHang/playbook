@@ -36,7 +36,9 @@ def doubao_tts(text, out_wav, voice):
     appid, token = os.environ["TTS_APPID"], os.environ["TTS_TOKEN"]
     body = {"app": {"appid": appid, "token": token, "cluster": "volcano_tts"},
             "user": {"uid": "dhv"},
-            "audio": {"voice_type": voice, "encoding": "wav", "speed_ratio": 1.0},
+            "audio": {"voice_type": voice, "encoding": "wav",
+                      # TTS_RATE 形如 +50% → speed_ratio 1.5(豆包用倍率而非增量)
+                      "speed_ratio": 1.0 + int(rate_arg().rstrip("%")) / 100.0},
             "request": {"reqid": str(uuid.uuid4()), "text": text, "operation": "query"}}
     req = urllib.request.Request("https://openspeech.bytedance.com/api/v1/tts",
         data=json.dumps(body).encode(),
@@ -49,6 +51,13 @@ def doubao_tts(text, out_wav, voice):
 
 PROXY_VARS = ("http_proxy", "https_proxy", "all_proxy",
               "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+
+def rate_arg():
+    """语速。edge-tts 用百分比增量:1.0x→+0%,1.5x→+50%。由 TTS_RATE 配置,默认 +0%。
+    **语速必须在 TTS 阶段调,不能在成片上加速**——数字人口型由音频驱动,成片加速会把
+    口型一起拉快,看着像快放;TTS 直接按目标语速合成,口型天然就是那个节奏。"""
+    return os.environ.get("TTS_RATE", "+0%")
+
 
 def edge_tts(text, out_wav, voice, no_proxy=False):
     """edge-tts 合成。no_proxy=True 时剥掉代理环境变量再跑。
@@ -63,7 +72,7 @@ def edge_tts(text, out_wav, voice, no_proxy=False):
         for v in PROXY_VARS:
             env.pop(v, None)
         env["NO_PROXY"] = "*"
-    subprocess.run([sys.executable, "-m", "edge_tts", "--voice", voice,
+    subprocess.run([sys.executable, "-m", "edge_tts", "--voice", voice, "--rate", rate_arg(),
                     "--text", text, "--write-media", mp3], check=True, env=env)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", mp3,
                     "-ar", "44100", "-ac", "1", out_wav], check=True)
@@ -72,7 +81,8 @@ def edge_tts(text, out_wav, voice, no_proxy=False):
 def say_tts(text, out_wav, voice="Tingting"):
     """三级兜底:macOS 本地 say(零网络;本机代理连 edge-tts 的微软端点都拦)。草稿用,正式片换豆包声。"""
     aiff = out_wav.replace(".wav", ".aiff")
-    subprocess.run(["say", "-v", voice, "-o", aiff, text], check=True)
+    wpm = int(180 * (1.0 + int(rate_arg().rstrip("%")) / 100.0))
+    subprocess.run(["say", "-v", voice, "-r", str(wpm), "-o", aiff, text], check=True)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", aiff,
                     "-ar", "44100", "-ac", "1", out_wav], check=True)
     os.remove(aiff)
