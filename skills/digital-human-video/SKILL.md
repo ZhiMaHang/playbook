@@ -126,6 +126,30 @@ scripts/make_portrait.sh check out.png          # 人景协调自检(色温/画�
    写「镜头极缓慢推近,人物轻微呼吸与眨眼,背景霓虹光斑流动」,
    不写「一个女性站在雨夜街头」。结尾固定加「电影感,人物面容保持一致,画面稳定不变形」。
 
+### req_key 备胎(某一个额度用尽时直接顶上)
+
+即梦的视频能力是**按 req_key 分别计额度**的,一个用尽不影响另一个。实测可互换:
+
+| req_key | 名义 | 实测 | 规格 |
+|---|---|---|---|
+| `jimeng_ti2v_v30_pro` | 3.0 Pro 图文生视频 | 吃 `image_urls` | 1088x1920,241帧=10.04s |
+| `jimeng_t2v_v30_1080p` | 3.0 1080P **文**生视频 | **同样吃 `image_urls`** | 与上完全一致 |
+
+**名字里的 t2v 不代表它不收图**(2026-08-04 实测:3.0 Pro 额度耗尽后,同样的
+`image_urls` + `frames` + `aspect_ratio` 原样换到 `jimeng_t2v_v30_1080p`,
+两段都一次出成,参数一个字没改)。所以出片脚本应当**按 req_key 列表依次退避**,
+而不是撞到 50400 就停下来问用户充值:
+
+```bash
+for RK in jimeng_t2v_v30_1080p jimeng_ti2v_v30_pro jimeng_i2v_first_tail_v30; do
+  python3 scripts/jimeng_video.py --req-key "$RK" ... && break
+done
+```
+
+零成本判断某个 key 还能不能用:拿假 task_id 打 `CVSync2AsyncGetResult`,
+**50400 = 该 key 不可用(额度尽或未开通),50500 = 可用**(查不到假任务而已),
+50200 = 名字不存在。注意这里 50500 反而是好消息,与直觉相反。
+
 ### 已知瞬时错误
 
 - `50220 Download Url Error` — 即梦服务端拉不到我们图床上的首帧图(connection reset)。
