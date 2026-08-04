@@ -24,10 +24,18 @@ while read -r kind a b c; do
   i=$((i+1)); SEG="$TMP/norm_$i.mp4"
   python3 "$DIR/render_text.py" strip "$TMP/sub_$i.png" "$(cat "$WORK/$c")"
   if [ "$kind" = "dh" ]; then
-    # 480P 数字人置于画面上部,下留字幕区
     if [ "$b" = "-" ]; then AUD=(-map 0:a); EXTRA=(); else AUD=(-map 3:a); EXTRA=(-i "$WORK/$b"); fi
+    # 数字人的输出画幅**不是固定的**:同一个 omni_v15,有时回 480P 小画幅、
+    # 有时回 1088x1920 整幅(2026-08-04 实测)。写死「缩到上部+留白」会把整幅素材
+    # 往下推 200px 再裁掉底部,所以这里按实际高度分流,不靠假设。
+    IH=$(ffprobe -v error -select_streams v -show_entries stream=height -of csv=p=0 "$WORK/$a")
+    if [ "${IH:-0}" -ge 1600 ]; then
+      VF="[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]"   # 整幅:铺满并裁回 1080
+    else
+      VF="[0:v]scale=1080:-2,pad=1080:1920:0:200:color=0x101828[bg]"                      # 小画幅:置于上部,下留字幕区
+    fi
     ffmpeg -nostdin -y -loglevel error -i "$WORK/$a" -i "$TMP/sub_$i.png" -i "$TMP/badge.png" ${EXTRA[@]+"${EXTRA[@]}"} \
-      -filter_complex "[0:v]scale=1080:-2,pad=1080:1920:0:200:color=0x101828[bg];[bg][1:v]overlay=0:H-h-140[s];[s][2:v]overlay=W-w-40:60[v]" \
+      -filter_complex "$VF;[bg][1:v]overlay=0:H-h-140[s];[s][2:v]overlay=W-w-40:60[v]" \
       -map "[v]" "${AUD[@]}" -r 25 -c:v libx264 -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 "$SEG"
   elif [ "$kind" = "clip" ]; then
     # 生成视频铺满整幅 + 外挂旁白。时长以旁白为准,视频多余部分裁掉。
