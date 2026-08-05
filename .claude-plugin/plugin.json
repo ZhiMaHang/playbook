@@ -1,6 +1,6 @@
 {
   "name": "playbook",
-  "version": "0.9.18",
+  "version": "0.9.19",
   "description": "智码航工具集,全程零猜测。提示词三件套——prompt-optimizer:消歧→两道选择题→纯拼接,把一句模糊的话理成可直接发送的提示词;five-sentence-brief:按五句话把一件要办的事补全成任务简报;four-part-prompt:按目标/背景/输出要求/边界约束四段补全成结构化提示词。数字人视频两件套——digital-human-video:文本+人像图→分镜脚本与成本表,确认后调火山·即梦AI 产出口播视频;digital-human-video-init:配置密钥并零成本验证。营销——marketing:按 SEO/GEO/SEM 清单对营销站线上与源码双向核对,代码层能改的直接改,其余产出人工待办。",
   "author": {
     "name": "ZhiMaHang"

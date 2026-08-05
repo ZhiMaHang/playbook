@@ -42,6 +42,33 @@ MOODS = {
 }
 
 
+def one_pole_highpass(x, cutoff_hz):
+    """一极高通。滤掉手机根本放不出的超低频——那些能量不但听不见,还白占动态余量,
+    害得整条音乐为了不削顶而被压小,连能听见的部分一起变轻(2026-08-04 实测踩到)。"""
+    return x - one_pole_lowpass(x, cutoff_hz)
+
+
+def bells(chord, n, start_gain=0.16):
+    """高把位铃声层:把和弦音移到 2~3 个八度上,短促衰减。
+    **这一层是给手机听的。** 手机喇叭在 1~4kHz 最有效率、人耳也在这一带最敏感,
+    而低把位铺底的能量几乎全在 400Hz 以下——只有铺底就等于在手机上隐形。"""
+    t = np.arange(n) / SR
+    out = np.zeros(n)
+    for k, f in enumerate(chord[1:]):                 # 跳过根音,避免低频再堆
+        for octv in (4.0, 8.0):                       # 上移 2 个与 3 个八度
+            fr = f * octv
+            if fr > 6000:                             # 太高会刺耳
+                continue
+            delay = int((0.9 + 1.7 * k) * SR)         # 错开进入,像点缀而不是齐奏
+            if delay >= n:
+                continue
+            m = n - delay
+            tt = t[:m]
+            env = np.exp(-tt * 1.6)                   # 铃声式指数衰减
+            out[delay:] += start_gain / octv * np.sin(2 * math.pi * fr * tt) * env
+    return out
+
+
 def one_pole_lowpass(x, cutoff_hz):
     """一极低通。滚掉高次谐波,合成音才不刺耳。"""
     a = math.exp(-2.0 * math.pi * cutoff_hz / SR)
@@ -110,6 +137,11 @@ def build(seconds, mood):
         sub = ch[0] / 2.0
         left[i:i + ln] += 0.5 * voice(sub, ln, 2.0, 0.3) * env
         right[i:i + ln] += 0.5 * voice(sub, ln, -2.0, 0.9) * env
+        # 铃声层(高把位点缀)。左右微错开,既加宽也避免两声道完全相干。
+        # **少了这一层整条音乐在手机上就是隐形的**,理由见 bells() 的注释。
+        bl = bells(ch, ln)
+        left[i:i + ln] += bl
+        right[i:i + ln] += np.roll(bl, 613)
         i += seg
         idx += 1
 
@@ -119,8 +151,10 @@ def build(seconds, mood):
     left += air
     right += np.roll(air, 977)                 # 左右错开,噪声也有宽度
 
-    left = space(one_pole_lowpass(left, 1800))
-    right = space(one_pole_lowpass(right, 1800))
+    # 低通抬到 5kHz:切在 1800 会把 1~4kHz 一起削掉,那正是手机能放出来的频段。
+    # 高通 110Hz:超低频对手机毫无意义,只会占掉动态余量。
+    left = space(one_pole_highpass(one_pole_lowpass(left, 5000), 110))
+    right = space(one_pole_highpass(one_pole_lowpass(right, 5000), 110))
 
     left, right = left[:total], right[:total]
     peak = max(np.abs(left).max(), np.abs(right).max(), 1e-9)
