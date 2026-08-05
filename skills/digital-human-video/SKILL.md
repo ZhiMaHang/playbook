@@ -316,22 +316,33 @@ python3 scripts/make_bgm.py --out work/<项目名>/bgm.wav --seconds 33 --mood c
 # mood: calm(夜景/思考类,默认) / bright(结论/产品类) / tense(问题/风险类)
 ```
 
-### 混音:必须带侧链闪避,并按实测调平
+### 混音:默认恒定音量,不要侧链闪避
 
-直接 `amix` 会把人声埋掉。正确做法是让音乐**在人说话时自动下潜**:
+侧链闪避(人一说话音乐自动下潜)在广播里是标准做法,但**在短视频里听感是「音乐忽大忽小」**,
+用户会直接抱怨(2026-08-04 实测)。短视频只有几十秒、人声几乎不停,闪避不断触发与释放,
+观众听到的就是一层不停呼吸的底噪。**默认不用闪避,选一个从头到尾压得住的恒定音量。**
+
+**两遍 loudnorm,第二遍必须 `linear=true`**——单遍 loudnorm 本身是**动态**的,
+即使去掉了侧链,它也会自己把音乐泵起来又压下去。「忽大忽小」有这两个来源,
+只去掉侧链是修不干净的。
 
 ```bash
+# 第一遍:测量
+ffmpeg -i 成片.mp4 -i bgm.wav -filter_complex \
+  "[1:a]volume=0.09[m];[0:a][m]amix=inputs=2:normalize=0:duration=first[a]" \
+  -map "[a]" -c:a pcm_s16le mix_raw.wav
+ffmpeg -i mix_raw.wav -af loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json -f null -   # 取 input_i/tp/lra/thresh
+
+# 第二遍:linear=true 施加单一恒定增益
 ffmpeg -y -i 成片.mp4 -i bgm.wav -filter_complex "
-  [1:a]volume=0.14[m];
-  [0:a]asplit=2[v1][vkey];
-  [m][vkey]sidechaincompress=threshold=0.04:ratio=5:attack=15:release=300[md];
-  [v1][md]amix=inputs=2:normalize=0:duration=first[mx];
-  [mx]loudnorm=I=-14:TP=-1.5:LRA=11[a]" \
+  [1:a]volume=0.09[m];[0:a][m]amix=inputs=2:normalize=0:duration=first[mx];
+  [mx]loudnorm=I=-14:TP=-1.5:LRA=11:linear=true:measured_I=<I>:measured_TP=<TP>:measured_LRA=<LRA>:measured_thresh=<TH>[a]" \
   -map 0:v -map "[a]" -c:v copy -c:a aac -b:a 192k -shortest 成片-配乐.mp4
 ```
 
 - `normalize=0` 必带,否则 amix 会把总音量砍半
 - `loudnorm=I=-14` 是社交平台的通行响度,不做的话在信息流里会明显比别人小声
+- 验收:量音乐层逐秒电平的标准差,**σ<4 dB 才算平稳**;残余波动应能归因到曲子本身
 
 ### 调平必须量 1~4kHz,**不能量全频段**(这条最容易错)
 
@@ -371,6 +382,19 @@ def band_db(x, lo, hi, SR):          # x 为单声道浮点样本
 > ⚠️ **zsh 陷阱**:本机默认 shell 是 zsh,`$2:ratio=` 里的 `:r`、`:a` 会被当成参数修饰符
 > (`:r` 去扩展名、`:a` 转绝对路径),把滤镜串吃坏且报错难懂。滤镜里引用位置参数一律写
 > `${2}` 带花括号。
+
+## 结尾引流卡(CTA)
+
+引流片结尾加一张 CTA 卡,配音 + 图卡 + 字幕三处同时给出同一句话。
+
+**配音要补静音**:TTS 念一句短 CTA 只要 2 秒左右,卡片跟着只停留 2 秒——观众来不及看清、
+更来不及去评论。补静音到 **3.5~4 秒**再进合成:
+
+```bash
+ffmpeg -y -i cta.wav -af "apad=pad_dur=1.65" -t 3.6 cta_padded.wav
+```
+
+**照用户原话渲染,不要替他改写措辞。** CTA 是转化环节,用词是用户的决定。
 
 ## 成片验收(合成完必做,不做不交付)
 
