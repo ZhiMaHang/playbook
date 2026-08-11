@@ -61,8 +61,25 @@ def signed_post(action, body: dict):
                                 f"SignedHeaders={signed_headers}, Signature={sig}")
     req = urllib.request.Request(f"https://{HOST}/?{query}", data=payload, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read())
+        # 网络层瞬时故障(TLS EOF、连接重置、超时)自动重试。
+        # 2026-08-10 实测:一次 "TLS/SSL connection has been closed (EOF)" 让整批三段直接崩在第一段——
+        # 而那只是一次抖动,重试即可。**批量出片时,一次抖动不该毁掉整批。**
+        # 注意只重试网络层异常;HTTPError(服务端明确答复)不重试,那是真错误。
+        last = None
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    return json.loads(r.read())
+            except urllib.error.HTTPError:
+                raise                                   # 交给下面的 except 处理
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+                last = e
+                if attempt < 3:
+                    wait = 2 ** attempt                 # 1s / 2s / 4s
+                    print(f"  网络抖动({type(e).__name__}),{wait}s 后重试 {attempt+1}/3")
+                    time.sleep(wait)
+                    continue
+        sys.exit(f"网络连续 4 次失败,放弃:{last}")
     except urllib.error.HTTPError as e:
         raw = e.read()
         try:
