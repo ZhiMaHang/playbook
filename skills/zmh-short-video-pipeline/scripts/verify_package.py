@@ -56,8 +56,9 @@ class Report:
         ]
         if self.include_cover_manual_check:
             manual_checks[3:3] = [
-                "将两版平台封面与用户指定或当前已验收的同规格基准并排核对标题区黑底/遮罩及字体排版样式",
+                "将三版平台封面与用户指定或当前已验收的同规格基准并排核对标题区黑底/遮罩及字体排版样式",
                 "缩略查看 B站 4:3 封面，确认左文右像、近黑标题区、金色标签、金/白两行、描边与标题安全区符合当前统一基准",
+                "缩略查看 YouTube Shorts 9:16 封面，确认标题避开右侧操作列和底部标题/频道信息区",
                 "后续实际发布时，发布页仍需单独勾选 AI 生成声明",
             ]
         return {
@@ -351,6 +352,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--video", type=Path, required=True, help="终版 MP4")
     parser.add_argument("--cover-vertical", type=Path, help="1080x1440 竖版封面")
     parser.add_argument("--cover-bilibili", type=Path, help="1440x1080 B站横版封面")
+    parser.add_argument("--cover-youtube-shorts", type=Path, help="1080x1920 YouTube Shorts 封面")
     parser.add_argument("--expected-width", type=int, default=1080)
     parser.add_argument("--expected-height", type=int, default=1920)
     parser.add_argument("--video-codec", default="h264")
@@ -368,7 +370,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     report = Report()
-    report.include_cover_manual_check = any((args.cover_vertical, args.cover_bilibili))
+    report.include_cover_manual_check = any(
+        (args.cover_vertical, args.cover_bilibili, args.cover_youtube_shorts)
+    )
     have_ffprobe = require_binary("ffprobe", report)
     need_ffmpeg = bool(args.frames_dir or args.decode_check or args.target_lufs is not None)
     have_ffmpeg = require_binary("ffmpeg", report) if need_ffmpeg else True
@@ -378,6 +382,7 @@ def main() -> int:
         duration = check_video(args, report)
         check_cover(args.cover_vertical, "竖版封面", (1080, 1440), report)
         check_cover(args.cover_bilibili, "B站封面", (1440, 1080), report)
+        check_cover(args.cover_youtube_shorts, "YouTube Shorts 封面", (1080, 1920), report)
 
     if have_ffmpeg:
         if args.target_lufs is not None:
