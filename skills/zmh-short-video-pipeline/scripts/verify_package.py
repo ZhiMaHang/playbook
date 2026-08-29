@@ -28,6 +28,7 @@ class Report:
         self.checks: list[Check] = []
         self.media: dict[str, Any] = {}
         self.frames: list[str] = []
+        self.include_cover_manual_check = False
 
     def add(self, level: str, name: str, detail: str) -> None:
         self.checks.append(Check(level, name, detail))
@@ -46,18 +47,25 @@ class Report:
         return any(check.level == "FAIL" for check in self.checks)
 
     def payload(self) -> dict[str, Any]:
+        manual_checks = [
+            "逐字核对首句、末句、关键数字与锁定稿",
+            "查看每个剪点/分镜的字幕、角标、遮挡与画面顺序",
+            "确认第一句实际口播从开头即有对应字幕，且没有混入未口播的封面标题、文档标题或栏目名",
+            "监听口型同步、BGM 稳定性及人声清晰度",
+            "确认音乐和肖像等素材拥有目标平台使用权",
+        ]
+        if self.include_cover_manual_check:
+            manual_checks[3:3] = [
+                "将两版平台封面与用户指定或当前已验收的同规格基准并排核对标题区黑底/遮罩及字体排版样式",
+                "缩略查看 B站 4:3 封面，确认左文右像、近黑标题区、金色标签、金/白两行、描边与标题安全区符合当前统一基准",
+                "后续实际发布时，发布页仍需单独勾选 AI 生成声明",
+            ]
         return {
             "ok": not self.has_failures,
             "checks": [asdict(check) for check in self.checks],
             "media": self.media,
             "frames": self.frames,
-            "manual_checks": [
-                "逐字核对首句、末句、关键数字与锁定稿",
-                "查看每个剪点/分镜的字幕、角标、遮挡与画面顺序",
-                "监听口型同步、BGM 稳定性及人声清晰度",
-                "确认音乐和肖像等素材拥有目标平台使用权",
-                "确认发布页仍需单独勾选 AI 生成声明",
-            ],
+            "manual_checks": manual_checks,
         }
 
 
@@ -343,7 +351,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--video", type=Path, required=True, help="终版 MP4")
     parser.add_argument("--cover-vertical", type=Path, help="1080x1440 竖版封面")
     parser.add_argument("--cover-bilibili", type=Path, help="1440x1080 B站横版封面")
-    parser.add_argument("--cover-youtube", type=Path, help="1280x720 YouTube 横版封面")
     parser.add_argument("--expected-width", type=int, default=1080)
     parser.add_argument("--expected-height", type=int, default=1920)
     parser.add_argument("--video-codec", default="h264")
@@ -361,6 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     report = Report()
+    report.include_cover_manual_check = any((args.cover_vertical, args.cover_bilibili))
     have_ffprobe = require_binary("ffprobe", report)
     need_ffmpeg = bool(args.frames_dir or args.decode_check or args.target_lufs is not None)
     have_ffmpeg = require_binary("ffmpeg", report) if need_ffmpeg else True
@@ -370,7 +378,6 @@ def main() -> int:
         duration = check_video(args, report)
         check_cover(args.cover_vertical, "竖版封面", (1080, 1440), report)
         check_cover(args.cover_bilibili, "B站封面", (1440, 1080), report)
-        check_cover(args.cover_youtube, "YouTube封面", (1280, 720), report)
 
     if have_ffmpeg:
         if args.target_lufs is not None:
