@@ -1,0 +1,174 @@
+{
+  "template_id": "zmh-talking-head-motion-v3",
+  "kind": "editable_handoff_and_editing_spec_not_renderer_or_comfyui_workflow",
+  "default_content": "same_presenter_primary_with_user_visual_insert_and_effect_subtitles",
+  "canvas": {
+    "width": 1080,
+    "height": 1920
+  },
+  "duration_seconds": null,
+  "fps": null,
+  "palette": {
+    "background": "#101828",
+    "accent": "#FFD774",
+    "text": "#F4F6F8",
+    "muted": "#A7B1C0"
+  },
+  "information_safe_box": {
+    "x": 72,
+    "y": 200,
+    "width": 828,
+    "height": 1300
+  },
+  "subtitle_style": "inherit_current_verified_render_text_strip",
+  "ai_badge_style": "inherit_current_verified_full_duration_badge",
+  "image_generation": {
+    "requested_model": "Image 2.5",
+    "actual_model": null,
+    "version_evidence": null,
+    "character_reference_path": null,
+    "status": "not_started"
+  },
+  "pc_generation": {
+    "owner": "user",
+    "application": "ComfyUI",
+    "workflow": null,
+    "resolution": null,
+    "fps": null,
+    "max_clip_seconds": null,
+    "status": "awaiting_user_generation"
+  },
+  "narration": {
+    "master_wav": "narration-master.wav",
+    "sample_rate": null,
+    "channels": null,
+    "total_samples": null,
+    "copy_locked": false,
+    "audio_qa": null,
+    "listening_qa": null
+  },
+  "motion_defaults": {
+    "transition": "cut",
+    "host_zoom_max": 1.05,
+    "host_zoom_min_source_width": 720,
+    "keyword_effect": "spoken_word_color_highlight",
+    "simultaneous_primary_motions": 1,
+    "looping_emphasis": false
+  },
+  "audio_defaults": {
+    "preserve_locked_voice": true,
+    "use_master_narration": true,
+    "mute_returned_clip_audio_after_sync_check": true,
+    "sfx_enabled": false,
+    "sfx_budget": 3,
+    "bgm": "inherit_current_verified_track_and_mix",
+    "end_fade_seconds": 0.6
+  },
+  "module_ids": [
+    "front_medium",
+    "front_close",
+    "slight_angle",
+    "return_medium",
+    "closing_close"
+  ],
+  "handoff_ready": false,
+  "shot_entry_template": {
+    "id": null,
+    "module": null,
+    "narration_text": null,
+    "narration_cue_ids": [],
+    "audio_start_sample": null,
+    "audio_end_sample": null,
+    "input_pad_start_samples": 0,
+    "input_pad_end_samples": 0,
+    "input_wav_duration_seconds": null,
+    "image_path": null,
+    "audio_path": null,
+    "prompt_path": null,
+    "image_generation_record_path": null,
+    "returned_video_path": null,
+    "source_in_seconds": null,
+    "source_out_seconds": null,
+    "timeline_start_seconds": null,
+    "timeline_end_seconds": null,
+    "sync_qa": null,
+    "motion": null,
+    "sfx": []
+  },
+  "shots": [],
+  "usage": "Use relative package paths. Populate measured values and per-shot image/audio pairs before presenter handoff. Half-open master WAV sample ranges in shots must partition the full narration exactly once; shots remain the complete presenter track. Populate actual returned video intervals and sync QA before editing. Each episode requires at least one user-provided screenshot, screen_recording, or diagram and a corresponding semantic visual insert; any one type is sufficient, not all three. Record these separately in visual_assets and visual_inserts, never as ComfyUI presenter shots. Insert timeline intervals must lie within the existing master narration timeline and must not extend it; narration continues and recording audio is muted by default. Use source_in_seconds/source_out_seconds only for recordings; keep them null for still images. A missing visual asset does not block audio or presenter handoff, but final_package_ready must remain false until asset and insert QA pass or the user explicitly waives the requirement for this episode and waiver_record is populated. Null measured values and empty shots mean incomplete presenter handoff; conditional fields may remain null when not applicable. See references/storyboard-motion.md.",
+  "visual_asset_requirement": {
+    "minimum_user_assets": 1,
+    "accepted_types": [
+      "screenshot",
+      "screen_recording",
+      "diagram"
+    ],
+    "all_types_required": false,
+    "minimum_visual_inserts": 1,
+    "status": "awaiting_user_asset",
+    "waived_by_user": false,
+    "waiver_record": null,
+    "audio_and_presenter_handoff_can_proceed_without_visual_asset": true,
+    "final_package_requires_asset_and_insert_qa_unless_waived": true
+  },
+  "visual_defaults": {
+    "presenter_remains_primary": true,
+    "narration_continues": true,
+    "extend_narration_timeline": false,
+    "recording_audio_enabled": false,
+    "layout_options": [
+      "full_screen_cutaway",
+      "picture_in_picture",
+      "overlay"
+    ],
+    "annotations_follow_visual_evidence": true
+  },
+  "subtitle_effects": {
+    "cover_full_actual_narration": true,
+    "keyword_highlight": "spoken_words_only_during_utterance",
+    "single_light_emphasis": "optional_once_per_selected_keyword",
+    "continuous_word_bounce": false,
+    "add_unspoken_text": false,
+    "timing_basis": "final_master_narration",
+    "entry_template": {
+      "narration_cue_id": null,
+      "spoken_text": null,
+      "timeline_start_seconds": null,
+      "timeline_end_seconds": null,
+      "effect": null
+    },
+    "entries": []
+  },
+  "visual_asset_entry_template": {
+    "id": null,
+    "type": null,
+    "provided_by": "user",
+    "file_path": null,
+    "source_record_path": null,
+    "content_summary": null,
+    "narration_cue_ids": [],
+    "duration_seconds": null,
+    "width": null,
+    "height": null,
+    "asset_qa": null
+  },
+  "visual_insert_entry_template": {
+    "id": null,
+    "visual_asset_id": null,
+    "narration_text": null,
+    "narration_cue_ids": [],
+    "timeline_start_seconds": null,
+    "timeline_end_seconds": null,
+    "source_in_seconds": null,
+    "source_out_seconds": null,
+    "layout": null,
+    "crop": null,
+    "annotations": [],
+    "recording_audio_enabled": false,
+    "insert_qa": null
+  },
+  "visual_assets": [],
+  "visual_inserts": [],
+  "final_package_ready": false
+}

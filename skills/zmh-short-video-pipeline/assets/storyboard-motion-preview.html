@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>人物镜头 · 构图参考</title>
+  <style>
+    :root {
+      --bg: #101828;
+      --card: #0B1018;
+      --gold: #FFD774;
+      --white: #F4F6F8;
+      --muted: #A7B1C0;
+      --line: #344052;
+      --soft-gold: #FFD77416;
+      --ui-font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--bg); color: var(--white); font-family: var(--ui-font); font-size: 16px; line-height: 1.6; }
+    button, input { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    button:disabled { cursor: default; opacity: .56; }
+    button:focus-visible, input:focus-visible { outline: 3px solid var(--gold); outline-offset: 4px; }
+    button:active:not(:disabled) { filter: brightness(.86); }
+    .shell { width: min(1152px, 100%); margin: 0 auto; padding: 44px 32px 36px; }
+    .page-top { display: flex; justify-content: space-between; align-items: center; gap: 20px; border-bottom: 1px solid var(--line); padding-bottom: 23px; margin-bottom: 34px; }
+    .series-label { margin: 0; font-size: 13px; color: var(--gold); letter-spacing: .12em; }
+    .edition { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 408px); gap: clamp(36px, 7vw, 96px); align-items: start; }
+    h1 { margin: 0 0 16px; font-size: clamp(30px, 4vw, 46px); line-height: 1.22; font-weight: 680; letter-spacing: -.04em; }
+    .intro { color: var(--muted); margin: 0 0 26px; max-width: 33em; }
+    .module-tabs { display: grid; gap: 9px; margin: 0 0 26px; }
+    .module-tab { display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 12px 16px; background: transparent; border: 1px solid var(--line); border-radius: 12px; text-align: left; transition: background-color .16s, border-color .16s; }
+    .module-tab:hover { background: #FFFFFF06; }
+    .module-tab[aria-selected="true"] { background: var(--soft-gold); border-color: var(--gold); }
+    .tab-number { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .module-tab[aria-selected="true"] .tab-number { color: var(--gold); }
+    .tab-title { font-size: 16px; }
+    .tab-mark { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--muted); }
+    .module-tab[aria-selected="true"] .tab-mark { border-color: var(--gold); background: var(--gold); }
+    .module-detail { border-top: 1px solid var(--line); padding-top: 20px; }
+    .detail-heading { color: var(--gold); font-size: 13px; margin: 0 0 8px; }
+    .detail-copy { margin: 0 0 10px; min-height: 3.2em; }
+    .detail-motion { color: var(--muted); margin: 0; font-size: 13px; }
+    .production-note { margin: 25px 0 0; padding: 14px 16px; background: var(--card); border-left: 2px solid var(--gold); border-radius: 0 9px 9px 0; color: var(--muted); font-size: 13px; }
+    .production-note strong { color: var(--white); font-weight: 500; }
+    .preview-column { width: 100%; max-width: 408px; margin-inline: auto; }
+    .preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; font-size: 12px; color: var(--muted); }
+    .preview-heading strong { font-weight: 500; color: var(--white); }
+    .stage { width: 100%; aspect-ratio: 9 / 16; position: relative; container-type: inline-size; border: 1px solid #465062; border-radius: 22px; overflow: hidden; background: var(--bg); isolation: isolate; }
+    .stage::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 25% 25%, #FFD7740B, transparent 52%); }
+    .ai-badge { position: absolute; top: 4.5%; right: 6.6667%; background: #0B1018CC; border: 1px solid #FFFFFF30; color: var(--white); font-size: 2.65cqw; line-height: 1.4; padding: 1cqw 1.45cqw; border-radius: 1.2cqw; z-index: 4; }
+    .scene { position: absolute; inset: 0; }
+    .motion-group { position: absolute; inset: 0; }
+    .composition { position: absolute; left: 6.6667%; right: 16.6667%; top: 39%; height: 29%; }
+    .composition.placeholder { position: absolute; width: auto; height: 29%; }
+    .scene .composition { position: absolute; width: auto; height: 29%; }
+    .scene .composition.portrait-composition { inset: 0; width: 100%; height: 100%; overflow: hidden; }
+    .portrait-art { position: absolute; left: -5%; top: 8%; width: 100%; height: 100%; overflow: visible; }
+    .shot-close .portrait-art { transform: scale(1.36); transform-origin: 50% 24%; }
+    .shot-side .portrait-art { transform: scale(1.17); transform-origin: 50% 26%; }
+    .studio-backdrop { position: absolute; inset: 0; background: radial-gradient(ellipse at 38% 28%, #344052 0, #172335 46%, #101828 83%); }
+    .studio-backdrop::after { content: ""; position: absolute; left: 7%; top: 0; bottom: 0; width: 1px; background: #FFFFFF0B; }
+    .svg-library { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .workflow { margin: 0 0 24px; padding-block: 13px; border-block: 1px solid var(--line); color: var(--muted); font-size: 13px; line-height: 2; }
+    .workflow span { display: inline-block; white-space: nowrap; }
+    .workflow b { color: var(--gold); font-weight: 400; padding-inline: 5px; }
+    .subtitle { position: absolute; top: 75%; left: 6.6667%; right: 16.6667%; text-align: center; z-index: 5; }
+    .subtitle-label { margin: 0 0 1.5cqw; color: var(--muted); font-size: 2.5cqw; }
+    .subtitle-text { display: inline; background: #0B1018E8; color: var(--white); font-size: 4.8cqw; font-weight: 560; line-height: 1.6; padding: .9cqw 1.8cqw; box-decoration-break: clone; -webkit-box-decoration-break: clone; border-radius: 1.1cqw; }
+    .safe-guide { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+    .safe-guide::before { content: ""; position: absolute; top: 3.75%; left: 6.6667%; right: 16.6667%; bottom: 17.7083%; border: 1px dashed #FFD774AA; border-radius: 1.5cqw; }
+    .safe-right { position: absolute; top: 0; bottom: 0; right: 0; width: 16.6667%; background: #FFD77409; border-left: 1px dashed #FFD77460; }
+    .safe-bottom { position: absolute; top: 82.2917%; left: 0; right: 0; bottom: 0; border-top: 1px dashed #FFD77460; background: #FFD77409; }
+    .safe-guide-label { position: absolute; left: 8%; top: 8%; color: var(--gold); background: var(--card); font-size: 2.6cqw; padding: .5cqw 1.4cqw; }
+    .transport { display: flex; gap: 10px; margin-top: 15px; }
+    .transport button { min-height: 46px; border-radius: 10px; padding: 9px 17px; border: 1px solid var(--line); background: var(--card); font-size: 14px; }
+    .transport .play { flex: 1; background: var(--gold); color: var(--card); border-color: var(--gold); font-weight: 600; }
+    .progress-track { margin-top: 12px; height: 3px; border-radius: 3px; overflow: hidden; background: var(--line); }
+    .progress-fill { height: 100%; background: var(--gold); transform-origin: left; transform: scaleX(1); }
+    .preview-status { font-size: 12px; color: var(--muted); margin: 10px 0 12px; min-height: 1.7em; }
+    .safe-control { display: flex; align-items: center; gap: 10px; cursor: pointer; min-height: 44px; font-size: 13px; color: var(--muted); }
+    .safe-control input { appearance: auto; width: 18px; height: 18px; margin: 0; accent-color: var(--gold); }
+    .page-foot { margin: 32px 0 0; border-top: 1px solid var(--line); padding-top: 18px; font-size: 12px; color: var(--muted); }
+    noscript p { padding: 14px; border: 1px solid var(--gold); color: var(--gold); }
+    @media (max-width: 720px) {
+      .shell { padding: 24px 20px; }
+      .page-top { margin-bottom: 24px; padding-bottom: 16px; }
+      .layout { grid-template-columns: 1fr; gap: 28px; }
+      .intro { margin-bottom: 20px; }
+      .module-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 20px; }
+      .module-tab { padding: 10px 12px; grid-template-columns: 20px 1fr; gap: 8px; min-height: 52px; }
+      .tab-title { font-size: 14px; }
+      .tab-mark { display: none; }
+      .detail-copy { min-height: auto; }
+      .production-note { margin-top: 18px; }
+      .preview-column { max-width: 386px; }
+    }
+    @media (max-width: 360px) {
+      .shell { padding-inline: 14px; }
+      .edition { display: none; }
+      .tab-title { font-size: 13px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+      .motion-group { opacity: 1 !important; transform: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="svg-library" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg"><defs>
+    <g id="portrait-clothes"><path d="M211 327c-55 13-94 27-116 60-22 34-27 89-36 149L24 900h552l-35-364c-9-60-14-115-36-149-22-33-61-47-116-60l-89 31Z" fill="#263244" stroke="#77879D" stroke-width="2"/><path d="m211 327 89 70 89-70M168 418l-22 482M432 418l22 482" fill="none" stroke="#4B5C73" stroke-width="3"/><path d="M210 659h180" fill="none" stroke="#43546A" stroke-width="3"/><path d="M245 286v49q55 39 110 0v-49" fill="#A7B1C0" stroke="#D1D8E2" stroke-width="2"/></g>
+    <g id="portrait-front"><use href="#portrait-clothes"/><path d="M206 178c0-67 38-101 94-101s94 34 94 101l-9 92c-4 42-42 74-85 74s-81-32-85-74Z" fill="#A7B1C0" stroke="#D1D8E2" stroke-width="2"/><path d="M207 182c-15-65 20-113 80-117 73-5 119 39 108 117-19-9-25-25-28-53-44 36-92 42-145 26l-7 27" fill="#172335" stroke="#77879D" stroke-width="2"/></g>
+    <g id="portrait-side"><use href="#portrait-clothes"/><g transform="rotate(-4 306 224)"><path d="M225 178c0-65 32-101 84-101 55 0 93 36 91 98l-6 83c-4 47-31 81-76 87-42 2-78-31-85-75Z" fill="#A7B1C0" stroke="#D1D8E2" stroke-width="2"/><path d="M226 192c-24-68 2-119 64-127 71-9 120 37 111 111-20-6-31-21-40-51-32 34-65 43-106 34l-8 33" fill="#172335" stroke="#77879D" stroke-width="2"/></g></g>
+  </defs></svg>
+  <main class="shell">
+    <header class="page-top">
+      <p class="series-label">人物镜头 · 构图参考</p>
+      <span class="edition">同一人物 / 多个镜头</span>
+    </header>
+    <div class="layout">
+      <section aria-labelledby="page-title">
+        <h1 id="page-title">人物口播，<br>画面辅助。</h1>
+        <p class="intro">成片以同一人物口播为主，每期由用户提供一份截图、录屏或示意图，三选一即可；在对应口播处插入素材，并配完整字幕、原词高亮和可选的单次轻强调。人物镜头保持角色、服装与背景一致，长度跟随已确认的口播。</p>
+        <p class="workflow" aria-label="计划制作流程"><span>文案与配音</span><b aria-hidden="true">→</b><span>Image 2.5人物图</span><b aria-hidden="true">→</b><span>PC ComfyUI口播视频</span><b aria-hidden="true">→</b><span>辅助素材＋特效字幕</span></p>
+        <div class="module-tabs" role="tablist" aria-label="分镜模块" aria-orientation="vertical">
+          <button class="module-tab" type="button" role="tab" id="tab-opening" aria-selected="true" aria-controls="scene-opening" tabindex="0" data-module="0"><span class="tab-number">01</span><span class="tab-title">正面中景</span><span class="tab-mark" aria-hidden="true"></span></button>
+          <button class="module-tab" type="button" role="tab" id="tab-point" aria-selected="false" aria-controls="scene-point" tabindex="-1" data-module="1"><span class="tab-number">02</span><span class="tab-title">正面近景</span><span class="tab-mark" aria-hidden="true"></span></button>
+          <button class="module-tab" type="button" role="tab" id="tab-focus" aria-selected="false" aria-controls="scene-focus" tabindex="-1" data-module="2"><span class="tab-number">03</span><span class="tab-title">轻侧中近景</span><span class="tab-mark" aria-hidden="true"></span></button>
+          <button class="module-tab" type="button" role="tab" id="tab-compare" aria-selected="false" aria-controls="scene-compare" tabindex="-1" data-module="3"><span class="tab-number">04</span><span class="tab-title">回到中景</span><span class="tab-mark" aria-hidden="true"></span></button>
+          <button class="module-tab" type="button" role="tab" id="tab-ending" aria-selected="false" aria-controls="scene-ending" tabindex="-1" data-module="4"><span class="tab-number">05</span><span class="tab-title">近景收束</span><span class="tab-mark" aria-hidden="true"></span></button>
+        </div>
+        <div class="module-detail" aria-live="polite" aria-atomic="true">
+          <p class="detail-heading" id="detail-heading">01 / 正面中景</p>
+          <p class="detail-copy" id="detail-copy">正面、中景，从头部展示到腰部附近，让同一人物自然开始口播。</p>
+          <p class="detail-motion" id="detail-motion">这里仅短暂淡入以展示构图，不模拟真实口型或人物动作。</p>
+        </div>
+        <p class="production-note"><strong>本页仅为新模板中的人物镜头构图参考，不含辅助素材合成或实际字幕动效预览。</strong><br>真实视频字幕覆盖完整口播，重点只强调实际说出的原词，不加未口播标题字幕。本页只有人物占位轮廓与静态字幕示意，没有调用 Image 2.5，也没有生成图片或视频。用户在 PC 用 ComfyUI 逐镜生成口播视频后交回，后期再按语义插入用户素材，保留连续旁白并加入特效字幕；录屏原音默认关闭。</p>
+        <noscript><p>当前仅显示正面中景构图。启用 JavaScript 后可切换景别与预览淡入。</p></noscript>
+      </section>
+      <section class="preview-column" aria-label="竖版分镜预览">
+        <p class="preview-heading"><strong>人物轮廓示意 · 无音频</strong><span>9:16</span></p>
+        <div class="stage" id="stage">
+          <div class="studio-backdrop" aria-hidden="true"></div>
+          <span class="ai-badge">视频由 AI 制作</span>
+          <article class="scene shot-medium" id="scene-opening" role="tabpanel" aria-labelledby="tab-opening">
+            <div class="motion-group"><div class="composition portrait-composition"><svg class="portrait-art" viewBox="0 0 600 900" preserveAspectRatio="xMidYMin meet" role="img" aria-label="同一人物正面中景的抽象轮廓，无面部特征"><use href="#portrait-front"/></svg></div></div>
+          </article>
+          <article class="scene shot-close" id="scene-point" role="tabpanel" aria-labelledby="tab-point" hidden>
+            <div class="motion-group"><div class="composition portrait-composition"><svg class="portrait-art" viewBox="0 0 600 900" preserveAspectRatio="xMidYMin meet" role="img" aria-label="同一人物正面近景的抽象轮廓，无面部特征"><use href="#portrait-front"/></svg></div></div>
+          </article>
+          <article class="scene shot-side" id="scene-focus" role="tabpanel" aria-labelledby="tab-focus" hidden>
+            <div class="motion-group"><div class="composition portrait-composition"><svg class="portrait-art" viewBox="0 0 600 900" preserveAspectRatio="xMidYMin meet" role="img" aria-label="同一人物轻侧中近景的抽象轮廓，无面部特征"><use href="#portrait-side"/></svg></div></div>
+          </article>
+          <article class="scene shot-medium" id="scene-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
+            <div class="motion-group"><div class="composition portrait-composition"><svg class="portrait-art" viewBox="0 0 600 900" preserveAspectRatio="xMidYMin meet" role="img" aria-label="同一人物回到正面中景，角色服装背景不变"><use href="#portrait-front"/></svg></div></div>
+          </article>
+          <article class="scene shot-close" id="scene-ending" role="tabpanel" aria-labelledby="tab-ending" hidden>
+            <div class="motion-group"><div class="composition portrait-composition"><svg class="portrait-art" viewBox="0 0 600 900" preserveAspectRatio="xMidYMin meet" role="img" aria-label="同一人物近景收束，角色服装背景不变"><use href="#portrait-front"/></svg></div></div>
+          </article>
+          <div class="subtitle"><p class="subtitle-label">字幕示意</p><span class="subtitle-text" id="subtitle-text">我们先把这件事说清楚。</span></div>
+          <div class="safe-guide" id="safe-guide" hidden aria-hidden="true"><div class="safe-right"></div><div class="safe-bottom"></div><span class="safe-guide-label">字幕安全区</span></div>
+        </div>
+        <div class="transport" aria-label="动效播放控制"><button class="play" id="play" type="button">播放当前模块</button><button id="replay" type="button">重播预览</button></div>
+        <div class="progress-track" aria-hidden="true"><div class="progress-fill" id="progress-fill"></div></div>
+        <p class="preview-status" id="preview-status" role="status">当前为静态构图。播放后短暂淡入并停留。</p>
+        <label class="safe-control"><input type="checkbox" id="safe-toggle">显示安全区参考线</label>
+      </section>
+    </div>
+    <footer class="page-foot">设计基准 1080 × 1920；三种基础景别仅用于人物镜头，整片按语义另行插入用户提供的辅助素材，不延长原口播时间轴。字幕避开右侧 180 与底部 340。此处淡入只用于查看构图，不代表成片切镜、口型或字幕动效。</footer>
+  </main>
+  <script>
+    'use strict';
+    const modules = [
+      { name: '正面中景', copy: '正面、中景，从头部展示到腰部附近，让同一人物自然开始口播。', motion: '基础镜头 A：角色、服装和背景固定。这里仅淡入展示构图，不模拟真实口型。', subtitle: '我们先把这件事说清楚。' },
+      { name: '正面近景', copy: '保持正面视线，切到头肩与胸部构图，用于承接口播中的一个重点。', motion: '基础镜头 B：只改变景别，不更换角色、服装或背景。', subtitle: '接下来，重点在这一点。' },
+      { name: '轻侧中近景', copy: '同一人物以小角度轻侧面对镜头，保留清楚的面部和口部范围，避免大侧脸。', motion: '基础镜头 C：小角度变化；人物身份、服装、光线和背景仍保持一致。', subtitle: '换个角度，把原因讲清楚。' },
+      { name: '回到中景', copy: '回到正面中景延续解释，可在辅助素材展示结束后接回人物镜头。', motion: '复用基础镜头 A 的构图。实际是否另生成镜头，由口播段落和动作连续性决定。', subtitle: '回到这件事本身。' },
+      { name: '近景收束', copy: '回到同一人物的正面近景，用已确认口播的末句自然结束。', motion: '复用基础镜头 B 的构图；末句后留自然停顿，不默认添加关注或购买引导。', subtitle: '最后，用一句话收束。' }
+    ];
+    const tabs = Array.from(document.querySelectorAll('[data-module]'));
+    const scenes = Array.from(document.querySelectorAll('.scene'));
+    const heading = document.getElementById('detail-heading');
+    const detail = document.getElementById('detail-copy');
+    const motion = document.getElementById('detail-motion');
+    const subtitle = document.getElementById('subtitle-text');
+    const playButton = document.getElementById('play');
+    const replayButton = document.getElementById('replay');
+    const status = document.getElementById('preview-status');
+    const progress = document.getElementById('progress-fill');
+    const safeToggle = document.getElementById('safe-toggle');
+    const safeGuide = document.getElementById('safe-guide');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const entranceDuration = 280;
+    // Observation hold only; this preview never chooses a real video's cut timing.
+    const observationDuration = 1800;
+    const designShift = 0;
+    let active = 0;
+    let elapsed = observationDuration;
+    let lastTick = 0;
+    let frameRequest = 0;
+    let running = false;
+
+    function render() {
+      const linear = reducedMotion.matches ? 1 : Math.min(1, elapsed / entranceDuration);
+      const eased = 1 - Math.pow(1 - linear, 3);
+      const group = scenes[active].querySelector('.motion-group');
+      group.style.opacity = String(eased);
+      group.style.transform = 'translate3d(0,' + ((1 - eased) * designShift / 10.8).toFixed(3) + 'cqw,0)';
+      progress.style.transform = 'scaleX(' + (elapsed / observationDuration).toFixed(4) + ')';
+    }
+
+    function stop() {
+      running = false;
+      if (frameRequest) window.cancelAnimationFrame(frameRequest);
+      frameRequest = 0;
+      lastTick = 0;
+    }
+
+    function updateControls(message) {
+      playButton.disabled = reducedMotion.matches;
+      replayButton.disabled = reducedMotion.matches;
+      playButton.textContent = reducedMotion.matches ? '静态预览' : running ? '暂停' : elapsed >= observationDuration ? '播放当前模块' : '继续播放';
+      status.textContent = message;
+    }
+
+    function tick(now) {
+      if (!running) return;
+      if (lastTick) elapsed = Math.min(observationDuration, elapsed + now - lastTick);
+      lastTick = now;
+      render();
+      if (elapsed >= observationDuration) {
+        stop();
+        updateControls('构图展示结束，保持静态。可切换景别或重播。');
+      } else {
+        frameRequest = window.requestAnimationFrame(tick);
+      }
+    }
+
+    function start(restart) {
+      stop();
+      if (reducedMotion.matches) {
+        elapsed = observationDuration;
+        render();
+        updateControls('已遵循减少动态效果偏好，直接显示静态终态。');
+        return;
+      }
+      if (restart || elapsed >= observationDuration) elapsed = 0;
+      running = true;
+      render();
+      updateControls('正在淡入展示构图，随后保持画面。');
+      frameRequest = window.requestAnimationFrame(tick);
+    }
+
+    function selectModule(index, animate) {
+      stop();
+      active = index;
+      tabs.forEach((tab, i) => {
+        tab.setAttribute('aria-selected', String(i === index));
+        tab.tabIndex = i === index ? 0 : -1;
+        scenes[i].hidden = i !== index;
+      });
+      const item = modules[index];
+      heading.textContent = String(index + 1).padStart(2, '0') + ' / ' + item.name;
+      detail.textContent = item.copy;
+      motion.textContent = item.motion;
+      subtitle.textContent = item.subtitle;
+      elapsed = observationDuration;
+      render();
+      if (animate && !reducedMotion.matches) start(true);
+      else updateControls(reducedMotion.matches ? '已遵循减少动态效果偏好，直接显示静态终态。' : '当前为静态构图。播放后短暂淡入并停留。');
+    }
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => selectModule(index, true));
+      tab.addEventListener('keydown', event => {
+        let next = index;
+        if (event.key === 'ArrowDown' || event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        tabs[next].focus();
+        selectModule(next, true);
+      });
+    });
+    playButton.addEventListener('click', () => {
+      if (running) {
+        stop();
+        updateControls('已暂停。继续播放可从当前位置恢复。');
+      } else start(false);
+    });
+    replayButton.addEventListener('click', () => start(true));
+    safeToggle.addEventListener('change', () => { safeGuide.hidden = !safeToggle.checked; });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && running) {
+        stop();
+        updateControls('页面离开前台，预览已暂停。');
+      }
+    });
+    function preferenceChanged() { selectModule(active, false); }
+    if (typeof reducedMotion.addEventListener === 'function') reducedMotion.addEventListener('change', preferenceChanged);
+    else if (typeof reducedMotion.addListener === 'function') reducedMotion.addListener(preferenceChanged);
+    selectModule(0, false);
+  </script>
+</body>
+</html>
