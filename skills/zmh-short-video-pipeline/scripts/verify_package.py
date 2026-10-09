@@ -27,6 +27,7 @@ AIGC_META_PATH = Path(__file__).resolve().parents[2] / "digital-human-video/scri
 # ② 字形与底框的亮度中位数差 ≥ 40。只有 ① 不够:纯白画面上没有角标也能过 ①。
 GLYPH_ALPHA_MIN = 200   # 角标 PNG 里 alpha ≥ 200 的像素是字形,腐蚀 1 px 后作字形掩码
 BOX_ALPHA_MAX = 100     # 0 < alpha ≤ 100 是底框
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")   # 环境里设了 AV_LOG_FORCE_COLOR 时 ffmpeg 日志带颜色码
 SHOWINFO_PTS = re.compile(r"\] n:\s*\d+\s+pts:\s*\S+\s+pts_time:\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)")
 GLYPH_INK_ALPHA = 158   # 量 PNG 实际字高:底框 95、白字 220,alpha ≥ 158 约等于字形覆盖过半,与渲染时「L 模式 >128」口径一致(实测四画幅与 JSON 相同)
 GLYPH_LUMA_MIN = 170
@@ -419,8 +420,8 @@ def png_ink_height(alpha: bytes, width: int) -> int:
 
 def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tuple[float, bytes]], list[float], int]:
     """只解角标区域，一遍解完：灰度帧写临时文件，showinfo 记下每帧时间戳。
-    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数）。抽样同 fps=1：第 0 帧、此后每个整秒时刻
-    正在屏上的那一帧（时间戳 ≤ 该时刻的最后一帧；变帧率里一帧停留跨过整秒也抽得到）、末帧。
+    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数）。抽样：第 0 帧、此后每个整秒时刻
+    正在屏上的那一帧（时间戳 ≤ 该时刻的最后一帧，相当于 fps=1:round=up；变帧率里一帧停留跨过整秒也抽得到）、末帧。
     passthrough：不补帧丢帧，帧和时间戳一一对应。"""
     size = w * h
     with tempfile.TemporaryDirectory() as tmp:
@@ -437,8 +438,10 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tupl
                 stderr=err,
                 check=False,
             )
-        times = [float(t) for t in SHOWINFO_PTS.findall(log.read_text("utf-8", "replace"))]
+        times = [float(t) for t in SHOWINFO_PTS.findall(ANSI_ESCAPE.sub("", log.read_text("utf-8", "replace")))]
         count = raw.stat().st_size // size if raw.exists() else 0
+        if not count or len(times) != count:   # 交给调用方报具名 FAIL,别在下面按下标取时间戳时崩掉
+            return [], times, count
         picks = [0] if count else []
         second = 1
         while count and times[0] + second <= times[count - 1]:
@@ -478,8 +481,8 @@ def container_problem(path: Path) -> tuple[bool, str | None]:
                 if len(head) < 16:
                     return True, "64 位 box 长度不全"
                 box_size = struct.unpack(">Q", head[8:16])[0]
-            elif box_size == 0:   # 一直到文件尾
-                return True, None
+            elif box_size == 0:   # 「一直到文件尾」：声明不了长度，截断无从核对
+                return False, None
             name = box_type.decode("latin-1")
             if box_size < 8:
                 return True, f"{name} box 长度 {box_size} 不合法"
@@ -552,7 +555,7 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
         fail("AI 角标像素", f"终版被截断或结构损坏（{problem}），末帧不是真末帧，角标全程无从核起")
         return
     if not checkable:
-        report.warn("AI 角标像素", "终版不是 MP4/MOV 盒结构，截断无从核对")
+        report.warn("AI 角标像素", "终版不是 MP4/MOV 盒结构或末尾 box 未声明长度，截断无从核对")
     picked, times, decoded = badge_frames(args.video.resolve(), x, y, w, h)
     if decoded == 0 or decoded != len(times):
         fail("AI 角标像素", f"终版解出 {decoded} 帧、时间戳 {len(times)} 个（为零或对不上：文件损坏，或临时目录写不下）")

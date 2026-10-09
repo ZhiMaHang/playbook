@@ -11,7 +11,8 @@
      封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、成片再混音、/bin/bash 3.2 下的冲突用例);
      变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标、一帧停留跨过整秒掉角标都要抓到;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
-     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧、画幅不符、
+     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧;
+     mdat 长度未声明时只报 WARN、ffmpeg 彩色日志照常解析、画幅不符、
      缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
      脱离插件目录找不到 aigc_meta.py 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN;
      aigc_meta.py check 命令行同样拦得住传错的 --source 和缺说明字段。
@@ -153,9 +154,9 @@ def old_badge(out: Path) -> tuple[int, int]:
     return img.size
 
 
-def verify(video: Path, *extra: str) -> tuple[int, str]:
+def verify(video: Path, *extra: str, env: dict[str, str] | None = None) -> tuple[int, str]:
     result = subprocess.run([sys.executable, str(VERIFY), "--video", str(video), *extra],
-                            capture_output=True, text=True, check=False)
+                            capture_output=True, text=True, check=False, env=dict(os.environ, **(env or {})))
     return result.returncode, result.stdout + result.stderr
 
 
@@ -205,7 +206,8 @@ def section_badge(tmp: Path) -> dict:
                 inks = ink_heights(fin, spec["x"], spec["y"], spec["w"], spec["h"])
                 check(all(v >= need for v in inks.values()), f"{w}x{h} 实测字形高 ≥ {need}", json.dumps(inks))
             code, out = verify(fin, "--badge-spec", str(png) + ".json", "--source", str(src), *dims(w, h))
-            check(code == 0, f"verify 正例·{w}x{h} 底色 {bg}", "exit 0" if code == 0 else out[-600:])
+            check(code == 0 and "[WARN] AI 角标像素" not in out, f"verify 正例·{w}x{h} 底色 {bg}(且角标像素无 WARN)",
+                  "exit 0" if code == 0 else out[-600:])
     try:
         rt.badge(str(tmp / "bad_anchor.png"), width=1080, height=1920, anchor="TR")
         check(False, "anchor 只认小写 tr/tl/br/bl")
@@ -411,6 +413,16 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
         cut_file.write_bytes(data[:cut])
         expect_fail(f"终版被截断({label})", cut_file, "AI 角标像素", "--badge-spec", spec, "--source", str(src),
                     detail="截断")
+    code, out = verify(fin, "--badge-spec", spec, "--source", str(src), env={"AV_LOG_FORCE_COLOR": "1"})
+    check(code == 0 and "[PASS] AI 角标像素" in out, "verify 正例·环境强制 ffmpeg 彩色日志也照常解析", f"exit={code}")
+    open_end = bytearray(fin.read_bytes())
+    at = open_end.find(b"mdat") - 4
+    open_end[at:at + 4] = bytes(4)   # mdat 长度写 0 =「一直到文件尾」
+    open_fin = tmp / "fin_mdat_size0.mp4"
+    open_fin.write_bytes(bytes(open_end))
+    code, out = verify(open_fin, "--badge-spec", spec, "--source", str(src))
+    check(code == 0 and "[WARN] AI 角标像素" in out and "无从核对" in out,
+          "mdat 长度写 0(到文件尾)时报「截断无从核对」WARN，不冒充核过", f"exit={code}")
     covers = []
     for name, size in (("cover_v.png", (1080, 1440)), ("cover_b.png", (1440, 1080)), ("cover_y.png", (1080, 1920))):
         Image.new("RGB", size, (20, 20, 20)).save(tmp / name)
