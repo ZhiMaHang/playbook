@@ -11,7 +11,7 @@
      封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、成片再混音、/bin/bash 3.2 下的冲突用例);
      变帧率、头部 -c copy 剪过的正例不误判截断;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
-     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(含只少 2 帧)、画幅不符、
+     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(含恰好少 2 帧)、画幅不符、
      缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
      脱离插件目录找不到 aigc_meta.py 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN;
      aigc_meta.py check 命令行同样拦得住传错的 --source 和缺说明字段。
@@ -122,6 +122,12 @@ def ink_heights(video: Path, x: int, y: int, w: int, h: int) -> dict[str, int]:
         rows = [r for r in range(h) if max(frame[r * w:(r + 1) * w]) > 128]
         out[label] = rows[-1] - rows[0] + 1 if rows else 0
     return out
+
+
+def decoded_frames(path: Path) -> int:
+    out = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:v:0", "-fps_mode", "passthrough",
+                          "-f", "framemd5", "-"], capture_output=True, text=True, check=False).stdout
+    return sum(1 for line in out.splitlines() if line and not line.startswith("#"))
 
 
 def mvhd_creation_time(path: Path) -> int:
@@ -328,11 +334,17 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     tex_fin = overlay(tex, png, *_xy(spec), tmp / "fin_texture.mp4", meta.ffmpeg_args(tex, 0))
     code, out = verify(tex_fin, "--badge-spec", spec, "--source", str(tex))
     check(code == 0, "verify 正例·有纹理的底片", "exit 0" if code == 0 else out[-400:])
-    tdata = tex_fin.read_bytes()
-    cut3 = tmp / "neg_truncated_3pct.mp4"
-    cut3.write_bytes(tdata[:len(tdata) * 97 // 100])
-    expect_fail("终版被截断(只截掉末尾 3%，少 2 帧左右)", cut3, "AI 角标像素", "--badge-spec", spec, "--source", str(tex),
-                detail="截断")
+    tdata, total = tex_fin.read_bytes(), decoded_frames(tex_fin)
+    cut2 = tmp / "neg_truncated_2frames.mp4"
+    lo, hi = len(tdata) // 2, len(tdata)   # 二分出「恰好少 2 帧」的最短截断:钉住 1 帧容差本身
+    while lo < hi:
+        mid = (lo + hi) // 2
+        cut2.write_bytes(tdata[:mid])
+        lo, hi = (mid + 1, hi) if decoded_frames(cut2) < total - 2 else (lo, mid)
+    cut2.write_bytes(tdata[:lo])
+    got = decoded_frames(cut2)
+    if check(got == total - 2, "构造「恰好少 2 帧」的截断样本", f"{got}/{total}"):
+        expect_fail("终版被截断(只少 2 帧)", cut2, "AI 角标像素", "--badge-spec", spec, "--source", str(tex), detail="截断")
     trimmed = tmp / "fin_head_trimmed.mp4"
     ff("-ss", "1", "-i", str(fin), "-c", "copy", *meta.ffmpeg_args(fin, 0), str(trimmed))
     code, out = verify(trimmed, "--badge-spec", spec, "--source", str(src))
