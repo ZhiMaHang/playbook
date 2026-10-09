@@ -24,7 +24,7 @@ AIGC_META_PATH = Path(__file__).resolve().parents[2] / "digital-human-video/scri
 # ② 字形与底框的亮度中位数差 ≥ 40。只有 ① 不够:纯白画面上没有角标也能过 ①。
 GLYPH_ALPHA_MIN = 200   # 角标 PNG 里 alpha ≥ 200 的像素是字形,腐蚀 1 px 后作字形掩码
 BOX_ALPHA_MAX = 100     # 0 < alpha ≤ 100 是底框
-GLYPH_INK_ALPHA = 158   # 量 PNG 实际字高:底框 95、白字 220,alpha > 157.5 即字形覆盖过半,和渲染时「L 模式 >128」同一口径
+GLYPH_INK_ALPHA = 158   # 量 PNG 实际字高:底框 95、白字 220,alpha ≥ 158 约等于字形覆盖过半,与渲染时「L 模式 >128」口径一致(实测四画幅与 JSON 相同)
 GLYPH_LUMA_MIN = 170
 GLYPH_RATIO_MIN = 0.95
 GLYPH_BOX_CONTRAST_MIN = 40
@@ -195,6 +195,7 @@ def check_video(args: argparse.Namespace, report: Report) -> float | None:
         "height": video.get("height") if video else None,
         "fps": frame_rate_of(video) if video else None,
         "nb_frames": as_float(video.get("nb_frames")) if video else None,
+        "video_duration": as_float(video.get("duration")) if video else None,
         "audio_codec": audio.get("codec_name") if audio else None,
         "sample_rate": audio.get("sample_rate") if audio else None,
         "channels": audio.get("channels") if audio else None,
@@ -414,11 +415,23 @@ def png_ink_height(alpha: bytes, width: int) -> int:
     return rows[-1] - rows[0] + 1 if rows else 0
 
 
+def expected_frames(video: dict[str, Any]) -> int | None:
+    """容器声明的视频帧数。nb_frames 是包数，含编辑表藏起来的预滚帧，所以和「视频流时长 × 平均帧率」取小；
+    不用整体时长（含音频，音频比画面长时会虚高）。两者都没有时返回 None。"""
+    candidates = []
+    if video.get("nb_frames"):
+        candidates.append(int(video["nb_frames"]))
+    if video.get("video_duration") and video.get("fps"):
+        candidates.append(round(video["video_duration"] * video["fps"]))
+    return min(candidates) if candidates else None
+
+
 def badge_frames(video: Path, x: int, y: int, w: int, h: int, fps: float) -> tuple[list[tuple[int, bytes]], int]:
-    """只解角标区域（crop），逐帧读灰度；返回（第 0 帧、之后每 1 秒一帧、末帧，解出的总帧数）。"""
+    """只解角标区域（crop），逐帧读灰度；返回（第 0 帧、之后每 1 秒一帧、末帧，解出的真实帧数）。
+    passthrough：不让 ffmpeg 为凑恒定帧率补帧或丢帧，数出来的才是真实帧数（变帧率片子不会被误判截断）。"""
     process = subprocess.Popen(
         [
-            "ffmpeg", "-v", "error", "-i", str(video), "-map", "0:v:0",
+            "ffmpeg", "-v", "error", "-i", str(video), "-map", "0:v:0", "-fps_mode", "passthrough",
             # 先转灰度再裁:yuv420p 上 crop 会把奇数宽高、坐标按色度对齐取偶,逐帧步长就错位了
             "-vf", f"format=gray,crop={w}:{h}:{x}:{y}", "-f", "rawvideo", "-pix_fmt", "gray", "-",
         ],
@@ -508,11 +521,13 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
         fail("AI 角标像素", "角标 PNG 里取不出字形或底框掩码")
         return
     picked, decoded = badge_frames(args.video.resolve(), x, y, w, h, fps)
-    declared = video.get("nb_frames") or round((video.get("duration") or 0) * fps)
-    declared = int(declared)
-    if decoded == 0 or decoded < declared - max(2, declared // 50):
+    declared = expected_frames(video)
+    # 容差 1 帧；容器没声明时至少要解出 1 帧
+    if decoded < max(1, (declared or 0) - 1):
         fail("AI 角标像素", f"终版只解出 {decoded} 帧，容器声明 {declared} 帧（文件可能被截断），角标全程无从核起")
         return
+    if declared is None:
+        report.warn("AI 角标像素", "容器没声明视频帧数和时长，截断无从核对")
     bad: list[str] = []
     checked = 0
     for index, frame in picked:

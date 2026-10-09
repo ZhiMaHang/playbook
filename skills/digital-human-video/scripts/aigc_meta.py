@@ -77,7 +77,8 @@ def ffmpeg_args(source_path: str | Path | None, input_index: int | None) -> list
         mapping: list[str] = []
     else:
         tags = format_tags(source_path)
-        clash = [k for k in tags if k.lower() == "description"]
+        # 已是我方说明字段(如对成片再混音)时原样再写一遍不算覆盖;别的 description 一律交人处理
+        clash = [k for k in tags if k.lower() == "description" and tags[k] != AI_DESCRIPTION]
         if clash:
             raise DescriptionConflict(
                 f"源片 {source_path} 已有 {clash[0]} 键,写说明字段会把它静默覆盖;请先由人决定怎么处理")

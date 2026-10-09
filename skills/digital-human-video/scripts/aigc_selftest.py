@@ -8,9 +8,10 @@
      1 s、2 s、末帧实测字形高;位置贴角;深浅两种底色过 verify_package 的像素判据;
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏、creation_time(普通源片、mdta 源片「X;X」与「A;B」都不让 mvhd 归零、真被改仍判变)、
-     封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、/bin/bash 3.2 下的冲突用例);
+     封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、成片再混音、/bin/bash 3.2 下的冲突用例);
+     变帧率、头部 -c copy 剪过的正例不误判截断;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
-     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断、画幅不符、
+     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(含只少 2 帧)、画幅不符、
      缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
      脱离插件目录找不到 aigc_meta.py 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN;
      aigc_meta.py check 命令行同样拦得住传错的 --source 和缺说明字段。
@@ -320,6 +321,34 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     expect_fail("说明字段只有 AI 没有生成", one_elem, "说明字段", "--badge-spec", spec, "--source", str(src))
     cli = meta_cli("check", str(one_elem), "--source", str(src))
     check(cli.returncode == 1 and "description" in cli.stdout, "CLI check·说明字段缺一要素", f"exit={cli.returncode}")
+    tex = tmp / "src_texture.mp4"
+    ff("-f", "lavfi", "-i", "testsrc2=s=1080x1920:d=3:r=25", "-f", "lavfi", "-i", f"sine=f=440:d={DURATION}",
+       "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", *tag_args(SRC_TAGS),
+       "-movflags", "+use_metadata_tags", str(tex))
+    tex_fin = overlay(tex, png, *_xy(spec), tmp / "fin_texture.mp4", meta.ffmpeg_args(tex, 0))
+    code, out = verify(tex_fin, "--badge-spec", spec, "--source", str(tex))
+    check(code == 0, "verify 正例·有纹理的底片", "exit 0" if code == 0 else out[-400:])
+    tdata = tex_fin.read_bytes()
+    cut3 = tmp / "neg_truncated_3pct.mp4"
+    cut3.write_bytes(tdata[:len(tdata) * 97 // 100])
+    expect_fail("终版被截断(只截掉末尾 3%，少 2 帧左右)", cut3, "AI 角标像素", "--badge-spec", spec, "--source", str(tex),
+                detail="截断")
+    trimmed = tmp / "fin_head_trimmed.mp4"
+    ff("-ss", "1", "-i", str(fin), "-c", "copy", *meta.ffmpeg_args(fin, 0), str(trimmed))
+    code, out = verify(trimmed, "--badge-spec", spec, "--source", str(src))
+    check(code == 0, "verify 正例·头部 -c copy 剪掉 1 s(编辑表藏了预滚帧，不误判截断)", "exit 0" if code == 0 else out[-400:])
+    w7, h7 = 720, 1280
+    png7 = tmp / "badge_720x1280.png"
+    spec7 = json.loads(Path(str(png7) + ".json").read_text(encoding="utf-8"))
+    vfr_src = tmp / "src_vfr.mp4"
+    ff("-f", "lavfi", "-i", f"color=c={DARK}:s={w7}x{h7}:d=5:r=30", "-f", "lavfi", "-i", "sine=f=440:d=4",
+       "-vf", "setpts='if(lt(N,30),N/30,if(lt(N,90),(30+(N-30)/2)/30,(N-30)/30))/TB'", "-fps_mode", "passthrough",
+       "-frames:v", "150", "-video_track_timescale", "600", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+       *tag_args(SRC_TAGS), "-movflags", "+use_metadata_tags", "-shortest", str(vfr_src))
+    vfr_fin = overlay(vfr_src, png7, spec7["x"], spec7["y"], tmp / "fin_vfr.mp4",
+                      meta.ffmpeg_args(vfr_src, 0) + ["-fps_mode", "passthrough", "-video_track_timescale", "600"])
+    code, out = verify(vfr_fin, "--badge-spec", str(png7) + ".json", "--source", str(vfr_src), *dims(w7, h7))
+    check(code == 0, "verify 正例·变帧率终版(不因补帧／丢帧误判截断)", "exit 0" if code == 0 else out[-400:])
     data = fin.read_bytes()
     for label, cut in (("截掉后 60%", len(data) * 4 // 10), ("只剩 moov", data.find(b"mdat") + 4)):
         cut_file = tmp / f"neg_truncated_{cut}.mp4"
@@ -418,7 +447,7 @@ def section_metadata(tmp: Path, samples: dict) -> None:
     side = meta_cli("sidecar", str(tmp / "side.json"), str(tmp / "nope.mp4"))
     check(side.returncode == 2 and "Traceback" not in side.stderr, "CLI sidecar 读不了文件时退出码 2、不抛 traceback")
     cli = meta_cli("check", str(mdta_out), "--source", f"file:{mdta_ct}")
-    check("Traceback" not in cli.stderr and cli.returncode in (0, 1), "CLI check 的 --source 带 file: 前缀不抛 traceback",
+    check("Traceback" not in cli.stderr and cli.returncode == 0, "CLI check 的 --source 带 file: 前缀照常比对、不抛 traceback",
           f"exit={cli.returncode}")
     try:
         meta.ffmpeg_args(src, -1)
@@ -484,6 +513,18 @@ def section_compose(tmp: Path) -> None:
     code, report = verify(out, "--badge-spec", str(spec_path), "--source", str(work / "dh1.mp4"))
     check(code == 0, "verify 正例·compose 成片", "exit 0" if code == 0 else report[-600:])
 
+    bgm = tmp / "bgm.wav"
+    ff("-f", "lavfi", "-i", "sine=f=220:d=4", str(bgm))
+    args_txt = meta_cli("args", str(out), "0")
+    peiyue = tmp / "compose_ok-配乐.mp4"
+    if check(args_txt.returncode == 0, "成片再混音:aigc_meta.py args 接受我方自己写的说明字段", args_txt.stderr.strip()[-120:]):
+        ff("-i", str(out), "-i", str(bgm), "-filter_complex",
+           "[1:a]volume=0.09[m];[0:a][m]amix=inputs=2:normalize=0:duration=first[a]",
+           "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
+           *args_txt.stdout.splitlines(), str(peiyue))
+        check(not meta.compare(peiyue, work / "dh1.mp4"), "成片再混音(按 SKILL.md 命令):对第一段源片 compare 无问题",
+              "; ".join(meta.compare(peiyue, work / "dh1.mp4")))
+
     cards = tmp / "compose_cards"
     cards.mkdir()
     Image.new("RGB", (1080, 1920), (40, 60, 90)).save(cards / "card.png")
@@ -519,10 +560,15 @@ def main() -> int:
         return 1
     tmp = Path(tempfile.mkdtemp(prefix="aigc_selftest_"))
     try:
-        samples = section_badge(tmp)
-        section_metadata(tmp, samples)
-        section_compose(tmp)
-        section_verify_negatives(tmp, samples)
+        samples: dict = {}
+        for name, run in (("1. 角标", lambda: samples.update(section_badge(tmp))),
+                          ("2. 元数据", lambda: section_metadata(tmp, samples)),
+                          ("2b. compose.sh", lambda: section_compose(tmp)),
+                          ("3. verify 反例", lambda: section_verify_negatives(tmp, samples))):
+            try:
+                run()
+            except Exception as exc:  # noqa: BLE001 - 一节抛异常也要记成具名 FAIL,别的节照跑
+                check(False, f"{name} 一节抛异常", f"{type(exc).__name__}: {exc}"[:300])
     finally:
         if os.environ.get("AIGC_SELFTEST_KEEP"):
             print(f"\n样本保留在 {tmp}")

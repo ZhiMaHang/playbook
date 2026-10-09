@@ -353,7 +353,7 @@ scripts/compose.sh work/<项目名> work/<项目名>/成品.mp4
 ### ④ 交付与归档
 
 - 给用户成片路径 + 实际总成本(按各段产出秒数合计)+ 生成耗时;
-- 显式 AI 角标(措辞取 `scripts/aigc_meta.py` 的 BADGE_TEXT,现为「视频由 AI 生成」)已由 compose.sh 按成片分辨率烧录(字高≥最短边 5%、全程);jimeng_dh.py 输出 aigc_meta_tagged=true 只说明**数字人段**带上了服务商写入的隐式标识,成片里还在不在,要靠 compose.sh 保留源元数据——交付前跑 `python3 scripts/aigc_meta.py check <成品.mp4> --source <第一个 dh/clip 段的源 mp4>` 核(多段时其余段的标识记在 `<成品.mp4>.source-metadata.json`,本地留存)。任一项不过在交付时明示;
+- 显式 AI 角标(措辞取 `scripts/aigc_meta.py` 的 BADGE_TEXT,现为「视频由 AI 生成」)已由 compose.sh 按成片分辨率烧录(字高≥最短边 5%、全程);jimeng_dh.py 输出 aigc_meta_tagged=true 只说明**数字人段**带上了服务商写入的隐式标识,成片里还在不在,要靠 compose.sh 保留源元数据——交付前对**实际交付的那个文件**(配了乐就是 `成片-配乐.mp4`)跑 `python3 scripts/aigc_meta.py check <交付文件.mp4> --source <第一个 dh/clip 段的源 mp4>` 核(多段时其余段的标识记在 `<成品.mp4>.source-metadata.json`,本地留存)。任一项不过在交付时明示;
 - 运营用途的片子:成片信息按所在工作区的归档约定记档(有台账则记入当期档);提醒发布时在平台侧勾选 AI 生成声明;**发布一律人工**,不在本技能内。
 
 ## 背景音乐(可选,但只能用自己合成的)
@@ -387,10 +387,13 @@ ffmpeg -i 成片.mp4 -i bgm.wav -filter_complex \
 ffmpeg -i mix_raw.wav -af loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json -f null -   # 取 input_i/tp/lra/thresh
 
 # 第二遍:linear=true 施加单一恒定增益
+# 末尾的 META 参数保住成片元数据(含服务商隐式标识)与说明字段;每行一个参数,读进数组再用(说明字段含空格)
+META_TXT=$(python3 scripts/aigc_meta.py args 成片.mp4 0)
+META=(); while IFS= read -r l; do META+=("$l"); done <<< "$META_TXT"
 ffmpeg -y -i 成片.mp4 -i bgm.wav -filter_complex "
   [1:a]volume=0.09[m];[0:a][m]amix=inputs=2:normalize=0:duration=first[mx];
   [mx]loudnorm=I=-14:TP=-1.5:LRA=11:linear=true:measured_I=<I>:measured_TP=<TP>:measured_LRA=<LRA>:measured_thresh=<TH>[a]" \
-  -map 0:v -map "[a]" -c:v copy -c:a aac -b:a 192k -shortest 成片-配乐.mp4
+  -map 0:v -map "[a]" -c:v copy -c:a aac -b:a 192k -shortest "${META[@]}" 成片-配乐.mp4
 ```
 
 - `normalize=0` 必带,否则 amix 会把总音量砍半
