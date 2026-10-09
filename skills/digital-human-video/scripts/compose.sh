@@ -34,6 +34,7 @@ if [ ${#SRCS[@]} -gt 0 ]; then
   python3 "$DIR/aigc_meta.py" sidecar "$OUT.source-metadata.json" "${SRCS[@]}"
 else
   META_TXT=$(python3 "$DIR/aigc_meta.py" args --no-source)
+  rm -f "$OUT.source-metadata.json"   # 同名出片上一次留下的 sidecar 已不对应本次
 fi
 META=(); while IFS= read -r l; do META+=("$l"); done <<< "$META_TXT"
 i=0; LIST="$TMP/concat.txt"; : > "$LIST"

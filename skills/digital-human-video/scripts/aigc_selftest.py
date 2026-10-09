@@ -8,7 +8,7 @@
      1 s、2 s、末帧实测字形高;位置贴角;深浅两种底色过 verify_package 的像素判据;
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏、creation_time(普通源片、mdta 源片「X;X」与「A;B」都不让 mvhd 归零、真被改仍判变)、
-     封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、成片再混音、/bin/bash 3.2 下的冲突用例);
+     封装器键不同的源片(含 Matroska 大写键名);小画幅角标;compose.sh 端到端(多段不同元数据、全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
      变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标、一帧停留跨过整秒掉角标都要抓到;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
      几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧;
@@ -214,6 +214,16 @@ def section_badge(tmp: Path) -> dict:
         check(False, "anchor 只认小写 tr/tl/br/bl")
     except ValueError:
         check(True, "anchor 只认小写 tr/tl/br/bl")
+    for (w, h) in ((432, 768), (360, 640)):   # 字号小到笔画撑不过腐蚀(ComfyUI 原生 432x768 一类)
+        png_s = tmp / f"badge_{w}x{h}.png"
+        spec_s = rt.badge(str(png_s), width=w, height=h)
+        src_s = make_src(tmp / f"src_{w}x{h}.mp4", w, h, LIGHT)
+        fin_s = overlay(src_s, png_s, spec_s["x"], spec_s["y"], tmp / f"fin_{w}x{h}.mp4", meta.ffmpeg_args(src_s, 0))
+        code, out = verify(fin_s, "--badge-spec", str(png_s) + ".json", "--source", str(src_s), *dims(w, h))
+        check(code == 0, f"verify 正例·小画幅 {w}x{h}(字号 {spec_s['font_size']})", "exit 0" if code == 0 else out[-300:])
+        bare = overlay(src_s, None, 0, 0, tmp / f"neg_{w}x{h}_no_badge.mp4", meta.ffmpeg_args(src_s, 0))
+        code, out = verify(bare, "--badge-spec", str(png_s) + ".json", "--source", str(src_s), *dims(w, h))
+        check(code != 0 and "[FAIL] AI 角标像素:" in out, f"verify 反例·小画幅 {w}x{h} 不叠角标", f"exit={code}")
     for anchor in ("tl", "br", "bl"):
         s = rt.badge(str(tmp / f"a_{anchor}.png"), width=1080, height=1920, anchor=anchor)
         left, top = s["x"], s["y"]
@@ -537,6 +547,15 @@ def section_metadata(tmp: Path, samples: dict) -> None:
     src_b, out_b = meta.format_tags(brand).get("major_brand"), meta.format_tags(brand_out).get("major_brand")
     check(src_b != out_b and not meta.compare(brand_out, brand), "封装器键(brand)源片与终版不同时不误报",
           f"{src_b} → {out_b}")
+    mkv = tmp / "src_matroska.mkv"
+    ff("-f", "lavfi", "-i", f"color=c={DARK}:s=320x240:d=1:r=25", "-f", "lavfi", "-i", "sine=d=1",
+       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-metadata", "title=mkv", str(mkv))
+    mkv_out = tmp / "meta_from_mkv.mp4"
+    ff("-i", str(mkv), "-c", "copy", *meta.ffmpeg_args(mkv, 0), str(mkv_out))
+    check("ENCODER" in meta.format_tags(mkv) and not meta.compare(mkv_out, mkv),
+          "Matroska 源片(键名大写 ENCODER)不误报封装器键", "; ".join(meta.compare(mkv_out, mkv)))
+    plain_mp4 = make_src(tmp / "src_plain_title.mp4", 320, 240, DARK, {"title": "mkv"}, dur=1)
+    check(not meta.write_sidecar(tmp / "mixed.json", [mkv, plain_mp4]), "sidecar:MKV 与 MP4 源片只差封装器键时不报「各段不同」")
     win = make_src(tmp / "src_winpath.mp4", 320, 240, DARK, {"comment": "D:\\ComfyUI\\output\\clip.mp4"}, dur=1)
     check(any("Windows" in f for f in meta.privacy_flags(win)), "privacy_flags 提示 Windows 盘符路径")
     side = meta_cli("sidecar", str(tmp / "side.json"), str(tmp / "nope.mp4"))
@@ -635,6 +654,7 @@ def section_compose(tmp: Path) -> None:
     (cards / "s1.txt").write_text("只有图卡", encoding="utf-8")
     (cards / "segments.txt").write_text("card card.png card.wav s1.txt\ncard card.png card.wav s1.txt\n", encoding="utf-8")
     cards_out = tmp / "compose_cards.mp4"
+    Path(str(cards_out) + ".source-metadata.json").write_text("{}", encoding="utf-8")   # 上一次同名出片留下的
     run3 = subprocess.run([bash, str(HERE / "compose.sh"), str(cards), str(cards_out)],
                           capture_output=True, text=True, check=False)
     tags = meta.format_tags(cards_out) if cards_out.is_file() else {}

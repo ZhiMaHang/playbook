@@ -29,7 +29,7 @@ AI_DESCRIPTION = "本视频含人工智能生成合成内容（AI 生成），�
 MIN_GLYPH_RATIO = 0.05   # 字高下限:画面最短边的 5%
 INK_SAFETY_PX = 2        # 渲染时墨迹再多留 2 px,吸收编码带来的边缘模糊
 
-# 由封装器决定、和源片无关的键:比对时排除
+# 由封装器决定、和源片无关的键:比对时排除(不分大小写:Matroska/WebM 源片读出来是 ENCODER)
 MUXER_KEYS = {"major_brand", "minor_version", "compatible_brands", "encoder"}
 BRAND_KEYS = ("major_brand", "minor_version", "compatible_brands")
 # 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「mvhd 值;mdta 原串」读出,比对前按集合比。
@@ -114,7 +114,7 @@ def compare(final: str | Path, source: str | Path) -> list[str]:
         return ["源片带 description 键,不像出片前的源片(最初的源片不带说明字段);--source 请传最初的源片,已出成片再混音时也一样"]
     problems = []
     for key, value in src.items():
-        if key in MUXER_KEYS:
+        if key.lower() in MUXER_KEYS:
             continue
         if key not in fin:
             problems.append(f"源片键 {key} 在终版里丢了")
@@ -145,7 +145,7 @@ def write_sidecar(out_json: str | Path, sources: list[str | Path]) -> bool:
     """把每个片段源文件的 format.tags 全量写进本地 sidecar(不上传)。
     一个文件只留一份隐式标识:容器里只映射第一段的。各段(除封装器键外)不同时返回 True。"""
     entries = [{"source": Path(s).name, "tags": format_tags(s)} for s in sources]
-    own = [{k: v for k, v in e["tags"].items() if k not in MUXER_KEYS} for e in entries]
+    own = [{k: v for k, v in e["tags"].items() if k.lower() not in MUXER_KEYS} for e in entries]
     differs = any(o != own[0] for o in own[1:])
     payload = {"kept_in_container": entries[0]["source"] if entries else None,
                "segments_differ": differs, "segments": entries}
