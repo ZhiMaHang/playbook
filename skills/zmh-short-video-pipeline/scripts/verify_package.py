@@ -509,6 +509,27 @@ def container_problem(path: Path) -> tuple[bool, str | None]:
     return True, None
 
 
+def load_badge_spec(path: Path) -> dict[str, Any]:
+    """读角标几何 JSON 并校验字段类型；不合格抛 ValueError（由调用方报「AI 角标几何」FAIL，别在后面用到时崩）。"""
+    spec = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(spec, dict):
+        raise ValueError("顶层应是对象")
+    for key in ("x", "y", "w", "h", "font_size", "ink_height_px"):
+        value = spec.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ValueError(f"{key} 应是整数，收到 {value!r}")
+    canvas = spec.get("canvas")
+    if not (isinstance(canvas, list) and len(canvas) == 2
+            and all(isinstance(v, int) and not isinstance(v, bool) for v in canvas)):
+        raise ValueError(f"canvas 应是两个整数 [宽, 高]，收到 {canvas!r}")
+    if not isinstance(spec.get("text"), str):
+        raise ValueError(f"text 应是字符串，收到 {spec.get('text')!r}")
+    png_name = spec.get("png")
+    if png_name is not None and not (isinstance(png_name, str) and png_name and Path(png_name).name == png_name):
+        raise ValueError(f"png 字段应是与几何 JSON 同目录的文件名，收到 {png_name!r}")
+    return spec
+
+
 def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: bool) -> None:
     fail = report.fail if strict else report.warn
     if args.badge_spec is None:
@@ -516,15 +537,11 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
         return
     spec_path = args.badge_spec.resolve()
     try:
-        spec = json.loads(spec_path.read_text(encoding="utf-8"))
-        x, y, w, h = (int(spec[key]) for key in ("x", "y", "w", "h"))
-        canvas = [int(value) for value in spec["canvas"]]
-        png_name = spec.get("png")
-        if png_name is not None and not (isinstance(png_name, str) and png_name and Path(png_name).name == png_name):
-            raise ValueError(f"png 字段应是与几何 JSON 同目录的文件名，收到 {png_name!r}")
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+        spec = load_badge_spec(spec_path)
+    except (OSError, ValueError) as exc:
         fail("AI 角标几何", f"读不了 {spec_path}: {exc}")
         return
+    x, y, w, h, canvas, png_name = spec["x"], spec["y"], spec["w"], spec["h"], spec["canvas"], spec.get("png")
     video = report.media.get("video", {})
     width, height = video.get("width"), video.get("height")
     if canvas != [width, height]:

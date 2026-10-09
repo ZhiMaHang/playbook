@@ -5,18 +5,21 @@
 改 render_text.badge()、aigc_meta.py、compose.sh 的角标/元数据部分,或 verify_package.py 的
 角标/元数据检查之后,都跑这一条。覆盖:
   1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅解码第 0 帧、
-     1 s、2 s、末帧实测字形高;位置贴角;深浅两种底色过 verify_package 的像素判据;
-     另有 432x768／360x640／540x960／610x1084 小画幅的 verify 正反例;
-  2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
-     description 冲突护栏、creation_time(普通源片、mdta 源片「X;X」与「A;B」都不让 mvhd 归零、真被改仍判变)、
-     封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、首段是 clip、全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
-     变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标、一帧停留跨过整秒掉角标都要抓到;
-  3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
-     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧;
-     mdat 长度未声明时只报 WARN、ffmpeg 彩色日志照常解析、画幅不符、
-     插入面板盖住部分角标、白闪盖过角标、缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
-     脱离插件目录找不到 aigc_meta.py 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN;
-     aigc_meta.py check 命令行同样拦得住传错的 --source 和缺说明字段。
+     1 s、2 s、末帧实测字形高、字高下限正好 5%、1080x1920 几何不漂;位置贴角;深浅两种底色过
+     verify_package 的像素判据;另有 432x768／360x640／540x960／610x1084 小画幅的 verify 正反例;
+  2. 元数据:源片键逐字保留(含非标准键)、说明字段、两要素判定、brand 三键无重复值、源片在第 0/1 路、
+     description 冲突护栏(含 Matroska 大写键名)、creation_time(普通源片、mdta 源片「X;X」与「A;B」
+     都不让 mvhd 归零、原串是 now、带时区原串逐字保留、不存在的时间不崩溃、MKV 小数秒、真被改仍判变)、
+     封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、首段是 clip、
+     全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
+  3. verify_package.py:正例 exit 0(含变帧率、头部或头尾 -c copy 剪过、音轨比画面长、mdat 长度未声明时
+     只报 WARN、ffmpeg 彩色日志);以下都必须 FAIL 并点名检查项:不叠角标、角标晚出/只在开头/中段掉了/
+     末尾掉了、变帧率慢段或一帧停留跨过整秒时掉角标、淡角标、65% 不透明度、左边缘被盖 70 px、插入面板盖住
+     部分角标、白闪盖过角标、旧角标、几何 JSON 墨迹或字号不足或字段不合格、JSON 自报够但 PNG 实测不够、
+     措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧、画幅不符、缺说明字段、
+     源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、脱离插件目录
+     找不到 aigc_meta.py;--legacy-audit 降为 WARN;aigc_meta.py check 命令行同样拦得住传错的 --source
+     和缺说明字段。
 样本里的 AIGC 键只用假值(example-producer / test-000N),只为验证「原样保留」。
 """
 from __future__ import annotations
@@ -169,8 +172,9 @@ def expect_fail(name: str, video: Path, item: str, *extra: str, detail: str = ""
     """非零退出,且报告里有以 [FAIL] <item>: 开头、含 detail 的一行。"""
     code, out = verify(video, *extra)
     hit = any(line.startswith(f"[FAIL] {item}:") and detail in line for line in out.splitlines())
+    named = f"「{item}」{('含「' + detail + '」') if detail else ''}"
     check(code != 0 and hit, f"verify 反例·{name}",
-          f"exit={code},点名「{item}」{('含「' + detail + '」') if detail else ''}" if code else "竟然 exit 0")
+          ("竟然 exit 0" if code == 0 else f"exit={code},点名{named}" if hit else f"exit={code},但报告里没点名{named}"))
 
 
 def section_badge(tmp: Path) -> dict:
@@ -202,6 +206,12 @@ def section_badge(tmp: Path) -> dict:
         check(on_disk == spec and spec["canvas"] == [w, h], f"{w}x{h} 写出几何 JSON")
         check(spec["font_size"] >= need, f"{w}x{h} 字号 ≥ {need}", str(spec["font_size"]))
         check(spec["ink_height_px"] >= need + 2, f"{w}x{h} 墨迹高 ≥ 下限＋2(给编码留余量)", str(spec["ink_height_px"]))
+        check(spec["min_required_px"] == need and meta.min_glyph_px(w, h) == need, f"{w}x{h} 字高下限正好是 {need}(5% 不多不少)",
+              str(spec["min_required_px"]))
+        if (w, h) == (1080, 1920) and spec["font_path"].endswith("STHeiti Medium.ttc"):
+            geo = {k: spec[k] for k in ("font_size", "w", "h", "x", "y")}
+            check(geo == {"font_size": 60, "w": 466, "h": 94, "x": 574, "y": 60},
+                  "1080x1920 角标几何没漂(预览 HTML 与平台遮挡核对都按它标定)", json.dumps(geo))
         check(spec["x"] >= 0 and spec["y"] >= 0 and spec["x"] + spec["w"] <= w and spec["y"] + spec["h"] <= h
               and w - spec["x"] - spec["w"] == mx and spec["y"] == my,
               f"{w}x{h} 框在画面内且贴右上角(边距 {mx},{my})",
@@ -366,6 +376,25 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
                             "-metadata", "compatible_brands=", "-metadata", f"description={meta.RETIRED_BADGE_TEXTS[0]}",
                             "-movflags", "+faststart+use_metadata_tags"])
     expect_fail("说明字段用了退役措辞", retired_desc, "说明字段", "--badge-spec", spec, "--source", str(src))
+    ex, ey, eh = base_spec["x"], base_spec["y"], base_spec["h"]
+    edge = tmp / "neg_left_edge_70px.mp4"
+    ff("-i", str(src), "-loop", "1", "-i", str(png), "-filter_complex",
+       f"[0:v][1:v]overlay={ex}:{ey}:shortest=1,drawbox=x={ex}:y={ey}:w=70:h={eh}:color=black:t=fill:enable='between(t,1,2.5)'[v]",
+       "-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
+       *meta.ffmpeg_args(src, 0), str(edge))
+    expect_fail("角标左边缘被盖住 70 px(约半个「视」)", edge, "AI 角标像素", "--badge-spec", spec, "--source", str(src),
+                detail="亮字占比")
+    soft = tmp / "neg_badge_65pct.mp4"
+    ff("-i", str(src), "-loop", "1", "-i", str(png), "-filter_complex",
+       f"[1:v]format=rgba,colorchannelmixer=aa=0.65[b];[0:v][b]overlay={ex}:{ey}:shortest=1[v]",
+       "-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
+       *meta.ffmpeg_args(src, 0), str(soft))
+    expect_fail("角标只有 65% 不透明度", soft, "AI 角标像素", "--badge-spec", spec, "--source", str(src), detail="亮字占比")
+    for n, (field, value) in enumerate((("canvas", []), ("canvas", [1080]), ("text", 123), ("x", "574"))):
+        malformed = tmp / f"spec_malformed_{n}.png.json"
+        malformed.write_text(json.dumps(dict(base_spec, **{field: value}), ensure_ascii=False), encoding="utf-8")
+        expect_fail(f"几何 JSON 的 {field} 不合格({value!r})", fin, "AI 角标几何", "--badge-spec", str(malformed),
+                    "--source", str(src))
     for n, bad_png in enumerate(("sub/badge.png", 123)):
         odd_spec = tmp / f"spec_badpng_{n}.png.json"
         odd_spec.write_text(json.dumps(dict(base_spec, png=bad_png), ensure_ascii=False), encoding="utf-8")
