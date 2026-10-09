@@ -8,7 +8,7 @@
 ⛔ 我方不是生成合成服务提供者,不写 AIGC、ContentProducer、ProduceID 这类形似服务商隐式标识的键。
 
 用法:
-  aigc_meta.py args <源片.mp4> <源片输入序号>    # 每行一个 ffmpeg 参数;源片已有 description 时退出码 2
+  aigc_meta.py args <源片.mp4> <源片输入序号>    # 每行一个 ffmpeg 参数;源片已有别的 description(不是我方说明字段)时退出码 2
   aigc_meta.py args --no-source                  # 没有源片(全是图卡)时:只写说明字段并清理 brand 三键
   aigc_meta.py check <终版.mp4> --source <源片.mp4>   # 有问题时退出码 1;隐私提示只打印、不删
   aigc_meta.py sidecar <out.json> <源片1> [源片2 ...]  # 多段源片元数据全量落本地;各段不同时打印 ⚠️
@@ -111,7 +111,7 @@ def compare(final: str | Path, source: str | Path) -> list[str]:
     if same:
         return ["源片与终版是同一个文件,比对不出任何东西;--source 请传出片前的源片"]
     if any(k.lower() == "description" for k in src):
-        return ["源片带 description 键,不像源片(源片带 description 时 ffmpeg_args 会拒绝出片);请传出片前的源片"]
+        return ["源片带 description 键,不像出片前的源片(最初的源片不带说明字段);--source 请传最初的源片,已出成片再混音时也一样"]
     problems = []
     for key, value in src.items():
         if key in MUXER_KEYS:

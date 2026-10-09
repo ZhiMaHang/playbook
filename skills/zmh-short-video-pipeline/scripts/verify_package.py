@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -194,7 +195,6 @@ def check_video(args: argparse.Namespace, report: Report) -> float | None:
         "width": video.get("width") if video else None,
         "height": video.get("height") if video else None,
         "fps": frame_rate_of(video) if video else None,
-        "nb_frames": as_float(video.get("nb_frames")) if video else None,
         "video_duration": as_float(video.get("duration")) if video else None,
         "audio_codec": audio.get("codec_name") if audio else None,
         "sample_rate": audio.get("sample_rate") if audio else None,
@@ -415,50 +415,49 @@ def png_ink_height(alpha: bytes, width: int) -> int:
     return rows[-1] - rows[0] + 1 if rows else 0
 
 
-def expected_frames(video: dict[str, Any]) -> int | None:
-    """容器声明的视频帧数。nb_frames 是包数，含编辑表藏起来的预滚帧，所以和「视频流时长 × 平均帧率」取小；
-    不用整体时长（含音频，音频比画面长时会虚高）。两者都没有时返回 None。"""
-    candidates = []
-    if video.get("nb_frames"):
-        candidates.append(int(video["nb_frames"]))
-    if video.get("video_duration") and video.get("fps"):
-        candidates.append(round(video["video_duration"] * video["fps"]))
-    return min(candidates) if candidates else None
-
-
-def badge_frames(video: Path, x: int, y: int, w: int, h: int, fps: float) -> tuple[list[tuple[int, bytes]], int]:
-    """只解角标区域（crop），逐帧读灰度；返回（第 0 帧、之后每 1 秒一帧、末帧，解出的真实帧数）。
-    passthrough：不让 ffmpeg 为凑恒定帧率补帧或丢帧，数出来的才是真实帧数（变帧率片子不会被误判截断）。"""
-    process = subprocess.Popen(
-        [
-            "ffmpeg", "-v", "error", "-i", str(video), "-map", "0:v:0", "-fps_mode", "passthrough",
-            # 先转灰度再裁:yuv420p 上 crop 会把奇数宽高、坐标按色度对齐取偶,逐帧步长就错位了
-            "-vf", f"format=gray,crop={w}:{h}:{x}:{y}", "-f", "rawvideo", "-pix_fmt", "gray", "-",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
+def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tuple[float, bytes]], list[float], int]:
+    """只解角标区域，一遍解完：灰度帧写临时文件，showinfo 记下每帧时间戳。
+    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数）。抽样按时间戳：第 0 帧、此后每隔 ≥ 1 秒的
+    第一帧、末帧——变帧率片子里慢的段落也逐秒抽到。passthrough：不补帧丢帧，帧和时间戳一一对应。"""
     size = w * h
-    picked: list[tuple[int, bytes]] = []
-    index, next_second, last = 0, 1, None
-    assert process.stdout is not None
-    while True:
-        frame = process.stdout.read(size)
-        if len(frame) < size:
-            break
-        if index == 0 or index >= round(next_second * fps):
-            if index:
-                next_second = math.floor(index / fps) + 1
-            picked.append((index, frame))
-            last = None
-        else:
-            last = (index, frame)
-        index += 1
-    process.stdout.close()
-    process.wait()
-    if last is not None:
-        picked.append(last)
-    return picked, index
+    with tempfile.TemporaryDirectory() as tmp:
+        raw, log = Path(tmp) / "badge.gray", Path(tmp) / "showinfo.log"
+        with log.open("wb") as err:
+            subprocess.run(
+                [
+                    "ffmpeg", "-v", "info", "-nostats", "-i", str(video), "-map", "0:v:0", "-fps_mode", "passthrough",
+                    # 先转灰度再裁:yuv420p 上 crop 会把奇数宽高、坐标按色度对齐取偶,逐帧步长就错位了
+                    "-vf", f"format=gray,crop={w}:{h}:{x}:{y},showinfo", "-f", "rawvideo", "-pix_fmt", "gray",
+                    "-y", str(raw),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=err,
+                check=False,
+            )
+        times = [float(t) for t in re.findall(r"pts_time:\s*(-?[\d.]+)", log.read_text("utf-8", "replace"))]
+        count = raw.stat().st_size // size if raw.exists() else 0
+        picks: list[int] = []
+        for index, moment in enumerate(times[:count]):
+            if not picks or moment - times[picks[-1]] >= 1 - 1e-6:
+                picks.append(index)
+        if count and (count - 1) not in picks:
+            picks.append(count - 1)
+        frames: list[tuple[float, bytes]] = []
+        if picks:
+            with raw.open("rb") as fh:
+                for index in picks:
+                    fh.seek(index * size)
+                    frames.append((times[index] if index < len(times) else float("nan"), fh.read(size)))
+    return frames, times, count
+
+
+def frames_short_of_end(times: list[float], video_duration: float | None, fps: float) -> float | None:
+    """解出的最后一帧离视频流结尾还差几帧(按最后一个帧间隔折算)。没有视频流时长时返回 None。
+    只看结尾：-c copy 剪过的片子中间可能缺一两帧(B 帧被切)，那不是截断。"""
+    if video_duration is None or not times:
+        return None
+    step = times[-1] - times[-2] if len(times) > 1 and times[-1] > times[-2] else 1 / fps
+    return (video_duration - (times[-1] - times[0] + step)) / step
 
 
 def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: bool) -> None:
@@ -520,27 +519,30 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
     if not glyph or not box:
         fail("AI 角标像素", "角标 PNG 里取不出字形或底框掩码")
         return
-    picked, decoded = badge_frames(args.video.resolve(), x, y, w, h, fps)
-    declared = expected_frames(video)
-    # 容差 1 帧；容器没声明时至少要解出 1 帧
-    if decoded < max(1, (declared or 0) - 1):
-        fail("AI 角标像素", f"终版只解出 {decoded} 帧，容器声明 {declared} 帧（文件可能被截断），角标全程无从核起")
+    picked, times, decoded = badge_frames(args.video.resolve(), x, y, w, h)
+    if decoded == 0 or decoded != len(times):
+        fail("AI 角标像素", f"终版解出 {decoded} 帧、时间戳 {len(times)} 个（为零或对不上：文件可能被截断或损坏），角标全程无从核起")
         return
-    if declared is None:
-        report.warn("AI 角标像素", "容器没声明视频帧数和时长，截断无从核对")
+    short = frames_short_of_end(times, video.get("video_duration"), fps)
+    if short is None:
+        report.warn("AI 角标像素", "容器没给视频流时长，截断无从核对")
+    elif short >= 1.5:   # 容差 1 帧
+        fail("AI 角标像素", f"解出的最后一帧（{times[-1]:.2f}s）离视频流结尾（{video['video_duration']:.2f}s）"
+             f"还差约 {short:.1f} 帧（文件可能被截断），角标全程无从核起")
+        return
     bad: list[str] = []
     checked = 0
-    for index, frame in picked:
+    for moment, frame in picked:
         checked += 1
         glyph_values = [frame[i] for i in glyph]
         ratio = sum(value >= GLYPH_LUMA_MIN for value in glyph_values) / len(glyph_values)
         contrast = median(glyph_values) - median([frame[i] for i in box])
         if ratio < GLYPH_RATIO_MIN or contrast < GLYPH_BOX_CONTRAST_MIN:
-            bad.append(f"第 {index} 帧（{index / fps:.2f}s）亮字占比 {ratio:.1%}、字形−底框 {contrast:.0f}")
+            bad.append(f"{moment:.2f}s 那一帧亮字占比 {ratio:.1%}、字形−底框 {contrast:.0f}")
     if bad:
         fail("AI 角标像素", f"{len(bad)}/{checked} 帧不像有角标：" + "；".join(bad[:5]))
     else:
-        report.passed("AI 角标像素", f"{checked} 帧（第 0 帧、每秒一帧、末帧）都检出角标")
+        report.passed("AI 角标像素", f"{checked} 帧（第 0 帧、此后按时间戳每秒一帧、末帧）都检出角标")
 
 
 def check_source_metadata(video: Path, source: Path, meta: Any, report: Report, fail: Any) -> None:

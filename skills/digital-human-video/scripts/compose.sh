@@ -23,7 +23,7 @@ BADGE_JSON=$(python3 "$DIR/render_text.py" badge "$TMP/badge.png" 1080 1920)
 BXY=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["x"], d["y"])' <<< "$BADGE_JSON")
 BX=${BXY% *}; BY=${BXY#* }
 # 元数据来源 = 第一个 dh/clip 段的原始源文件(一个文件只留一份隐式标识;各段不同时其余记进本地 sidecar)。
-# 护栏放在编码之前:源片已有 description 时 aigc_meta.py 非零退出,赋值式命令替换让 set -e 当场停下。
+# 护栏放在编码之前:源片已有别的 description(不是我方说明字段)时 aigc_meta.py 非零退出,赋值式命令替换让 set -e 当场停下。
 # ⚠️ 不要改成 `done < <(python3 …)`:进程替换的失败不触发 set -e,护栏会被吞掉;bash 3.2 也没有 mapfile。
 SRCS=()
 while read -r kind a _; do

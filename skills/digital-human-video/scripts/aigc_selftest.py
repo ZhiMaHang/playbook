@@ -9,7 +9,7 @@
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏、creation_time(普通源片、mdta 源片「X;X」与「A;B」都不让 mvhd 归零、真被改仍判变)、
      封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、成片再混音、/bin/bash 3.2 下的冲突用例);
-     变帧率、头部 -c copy 剪过的正例不误判截断;
+     变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标要抓到;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
      几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(含恰好少 2 帧)、画幅不符、
      缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
@@ -349,6 +349,17 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     ff("-ss", "1", "-i", str(fin), "-c", "copy", *meta.ffmpeg_args(fin, 0), str(trimmed))
     code, out = verify(trimmed, "--badge-spec", spec, "--source", str(src))
     check(code == 0, "verify 正例·头部 -c copy 剪掉 1 s(编辑表藏了预滚帧，不误判截断)", "exit 0" if code == 0 else out[-400:])
+    both = tmp / "fin_head_tail_trimmed.mp4"
+    ff("-ss", "1.02", "-i", str(fin), "-t", "1.3", "-c", "copy", *meta.ffmpeg_args(fin, 0), str(both))
+    code, out = verify(both, "--badge-spec", spec, "--source", str(src))
+    check(code == 0, "verify 正例·头尾都 -c copy 剪过(中间缺帧、结尾差半帧，不误判截断)", "exit 0" if code == 0 else out[-400:])
+    longer = tmp / "fin_audio_longer.mp4"
+    ff("-i", str(src), "-loop", "1", "-i", str(png), "-f", "lavfi", "-i", f"sine=f=330:d={DURATION + 0.4}",
+       "-filter_complex", f"[0:v][1:v]overlay={_xy(spec)[0]}:{_xy(spec)[1]}:shortest=1[v]",
+       "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
+       *meta.ffmpeg_args(src, 0), str(longer))
+    code, out = verify(longer, "--badge-spec", spec, "--source", str(src), "--max-duration", "10")
+    check(code == 0, "verify 正例·音轨比画面长 0.4 s(按视频流时长判截断，不用整体时长)", "exit 0" if code == 0 else out[-400:])
     w7, h7 = 720, 1280
     png7 = tmp / "badge_720x1280.png"
     spec7 = json.loads(Path(str(png7) + ".json").read_text(encoding="utf-8"))
@@ -361,6 +372,16 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
                       meta.ffmpeg_args(vfr_src, 0) + ["-fps_mode", "passthrough", "-video_track_timescale", "600"])
     code, out = verify(vfr_fin, "--badge-spec", str(png7) + ".json", "--source", str(vfr_src), *dims(w7, h7))
     check(code == 0, "verify 正例·变帧率终版(不因补帧／丢帧误判截断)", "exit 0" if code == 0 else out[-400:])
+    gap_src = tmp / "src_vfr_gap.mp4"
+    ff("-f", "lavfi", "-i", f"color=c={DARK}:s={w7}x{h7}:d=10:r=25", "-f", "lavfi", "-i", "sine=f=440:d=7",
+       "-vf", "setpts='if(lt(N,50),N/25,if(lt(N,53),2+(N-50),5+(N-53)/25))/TB'", "-frames:v", "103",
+       "-fps_mode", "passthrough", "-video_track_timescale", "600", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+       "-c:a", "aac", *tag_args(SRC_TAGS), "-movflags", "+use_metadata_tags", "-shortest", str(gap_src))
+    gap_fin = overlay(gap_src, png7, spec7["x"], spec7["y"], tmp / "neg_vfr_gap.mp4",
+                      meta.ffmpeg_args(gap_src, 0) + ["-fps_mode", "passthrough", "-video_track_timescale", "600"],
+                      "not(between(t,2,4.99))")
+    expect_fail("变帧率终版在慢段(每秒 1 帧的 2–5 s)掉角标", gap_fin, "AI 角标像素", "--badge-spec", str(png7) + ".json",
+                "--source", str(gap_src), *dims(w7, h7))
     data = fin.read_bytes()
     for label, cut in (("截掉后 60%", len(data) * 4 // 10), ("只剩 moov", data.find(b"mdat") + 4)):
         cut_file = tmp / f"neg_truncated_{cut}.mp4"
@@ -470,6 +491,14 @@ def section_metadata(tmp: Path, samples: dict) -> None:
                               "--source", str(src)], capture_output=True, text=True, check=False)
     check(missing.returncode != 0 and "Traceback" not in missing.stderr, "CLI check 读不了文件时报 FAIL、不抛 traceback")
 
+    for label, desc in (("另一句含两要素的说明", "视频由AI生成；人物画面由开源模型生成"),
+                        ("我方说明字段后面多了附注", meta.AI_DESCRIPTION + "（附注）")):
+        other = make_src(tmp / f"src_desc_{len(desc)}.mp4", 320, 240, DARK, {"description": desc}, dur=1)
+        try:
+            meta.ffmpeg_args(other, 0)
+            check(False, f"冲突护栏:源片 description 是{label}时也报冲突")
+        except meta.DescriptionConflict:
+            check(True, f"冲突护栏:源片 description 是{label}时也报冲突")
     clash = make_src(tmp / "src_desc.mp4", 1080, 1920, DARK, dict(SRC_TAGS, description="SRCDESC"), dur=1)
     try:
         meta.ffmpeg_args(clash, 0)
