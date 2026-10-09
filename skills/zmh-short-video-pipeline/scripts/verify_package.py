@@ -9,6 +9,7 @@ import json
 import math
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ AIGC_META_PATH = Path(__file__).resolve().parents[2] / "digital-human-video/scri
 # ② 字形与底框的亮度中位数差 ≥ 40。只有 ① 不够:纯白画面上没有角标也能过 ①。
 GLYPH_ALPHA_MIN = 200   # 角标 PNG 里 alpha ≥ 200 的像素是字形,腐蚀 1 px 后作字形掩码
 BOX_ALPHA_MAX = 100     # 0 < alpha ≤ 100 是底框
+SHOWINFO_PTS = re.compile(r"\] n:\s*\d+\s+pts:\s*\S+\s+pts_time:\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)")
 GLYPH_INK_ALPHA = 158   # 量 PNG 实际字高:底框 95、白字 220,alpha ≥ 158 约等于字形覆盖过半,与渲染时「L 模式 >128」口径一致(实测四画幅与 JSON 相同)
 GLYPH_LUMA_MIN = 170
 GLYPH_RATIO_MIN = 0.95
@@ -195,7 +197,6 @@ def check_video(args: argparse.Namespace, report: Report) -> float | None:
         "width": video.get("width") if video else None,
         "height": video.get("height") if video else None,
         "fps": frame_rate_of(video) if video else None,
-        "video_duration": as_float(video.get("duration")) if video else None,
         "audio_codec": audio.get("codec_name") if audio else None,
         "sample_rate": audio.get("sample_rate") if audio else None,
         "channels": audio.get("channels") if audio else None,
@@ -434,7 +435,7 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tupl
                 stderr=err,
                 check=False,
             )
-        times = [float(t) for t in re.findall(r"pts_time:\s*(-?[\d.]+)", log.read_text("utf-8", "replace"))]
+        times = [float(t) for t in SHOWINFO_PTS.findall(log.read_text("utf-8", "replace"))]
         count = raw.stat().st_size // size if raw.exists() else 0
         picks: list[int] = []
         for index, moment in enumerate(times[:count]):
@@ -451,13 +452,36 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tupl
     return frames, times, count
 
 
-def frames_short_of_end(times: list[float], video_duration: float | None, fps: float) -> float | None:
-    """解出的最后一帧离视频流结尾还差几帧(按最后一个帧间隔折算)。没有视频流时长时返回 None。
-    只看结尾：-c copy 剪过的片子中间可能缺一两帧(B 帧被切)，那不是截断。"""
-    if video_duration is None or not times:
-        return None
-    step = times[-1] - times[-2] if len(times) > 1 and times[-1] > times[-2] else 1 / fps
-    return (video_duration - (times[-1] - times[0] + step)) / step
+BMFF_FIRST_BOXES = {b"ftyp", b"styp", b"moov", b"mdat", b"free", b"skip", b"wide", b"pnot"}
+
+
+def container_problem(path: Path) -> tuple[bool, str | None]:
+    """逐个走 MP4/MOV 的顶层 box：哪个 box 声明的长度超出文件，就是被截断（字节级，与帧时间无关）。
+    返回（能否核，问题）：不是 MP4/MOV 盒结构时返回 (False, None)；结构完整时返回 (True, None)。"""
+    size = path.stat().st_size
+    with path.open("rb") as fh:
+        offset = 0
+        while offset < size:
+            fh.seek(offset)
+            head = fh.read(16)
+            if len(head) < 8:
+                return True, f"文件末尾只剩 {len(head)} 字节的残缺 box 头"
+            box_size, box_type = struct.unpack(">I4s", head[:8])
+            if offset == 0 and box_type not in BMFF_FIRST_BOXES:
+                return False, None
+            if box_size == 1:   # 64 位长度
+                if len(head) < 16:
+                    return True, "64 位 box 长度不全"
+                box_size = struct.unpack(">Q", head[8:16])[0]
+            elif box_size == 0:   # 一直到文件尾
+                return True, None
+            name = box_type.decode("latin-1")
+            if box_size < 8:
+                return True, f"{name} box 长度 {box_size} 不合法"
+            if offset + box_size > size:
+                return True, f"{name} box 声明 {box_size} 字节，文件从它起只剩 {size - offset} 字节"
+            offset += box_size
+    return True, None
 
 
 def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: bool) -> None:
@@ -515,20 +539,18 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
     else:
         report.passed("AI 角标字高", f"角标 PNG 实测字高 {measured}px ≥ {need}px")
     glyph, box = badge_masks(alpha, w, h)
-    fps = video.get("fps") or 25.0
     if not glyph or not box:
         fail("AI 角标像素", "角标 PNG 里取不出字形或底框掩码")
         return
+    checkable, problem = container_problem(args.video.resolve())
+    if problem:
+        fail("AI 角标像素", f"终版被截断或结构损坏（{problem}），末帧不是真末帧，角标全程无从核起")
+        return
+    if not checkable:
+        report.warn("AI 角标像素", "终版不是 MP4/MOV 盒结构，截断无从核对")
     picked, times, decoded = badge_frames(args.video.resolve(), x, y, w, h)
     if decoded == 0 or decoded != len(times):
-        fail("AI 角标像素", f"终版解出 {decoded} 帧、时间戳 {len(times)} 个（为零或对不上：文件可能被截断或损坏），角标全程无从核起")
-        return
-    short = frames_short_of_end(times, video.get("video_duration"), fps)
-    if short is None:
-        report.warn("AI 角标像素", "容器没给视频流时长，截断无从核对")
-    elif short >= 1.5:   # 容差 1 帧
-        fail("AI 角标像素", f"解出的最后一帧（{times[-1]:.2f}s）离视频流结尾（{video['video_duration']:.2f}s）"
-             f"还差约 {short:.1f} 帧（文件可能被截断），角标全程无从核起")
+        fail("AI 角标像素", f"终版解出 {decoded} 帧、时间戳 {len(times)} 个（为零或对不上：文件损坏，或临时目录写不下）")
         return
     bad: list[str] = []
     checked = 0

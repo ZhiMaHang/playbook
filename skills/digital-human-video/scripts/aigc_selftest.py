@@ -11,7 +11,7 @@
      封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、成片再混音、/bin/bash 3.2 下的冲突用例);
      变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标要抓到;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
-     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(含恰好少 2 帧)、画幅不符、
+     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、画幅不符、
      缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
      脱离插件目录找不到 aigc_meta.py 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN;
      aigc_meta.py check 命令行同样拦得住传错的 --source 和缺说明字段。
@@ -352,18 +352,18 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     between = tmp / "fin_head_trimmed_between_frames.mp4"
     ff("-ss", "1.01", "-i", str(fin), "-c", "copy", *meta.ffmpeg_args(fin, 0), str(between))
     code, out = verify(between, "--badge-spec", spec, "--source", str(src))
-    check(code == 0, "verify 正例·头部剪在两帧之间(结尾差约 0.75 帧，在 1 帧容差内)", "exit 0" if code == 0 else out[-400:])
+    check(code == 0, "verify 正例·头部剪在两帧之间(编辑表带小数帧，不误判截断)", "exit 0" if code == 0 else out[-400:])
     both = tmp / "fin_head_tail_trimmed.mp4"
     ff("-ss", "1.02", "-i", str(fin), "-t", "1.3", "-c", "copy", *meta.ffmpeg_args(fin, 0), str(both))
     code, out = verify(both, "--badge-spec", spec, "--source", str(src))
-    check(code == 0, "verify 正例·头尾都 -c copy 剪过(中间缺帧、结尾差半帧，不误判截断)", "exit 0" if code == 0 else out[-400:])
+    check(code == 0, "verify 正例·头尾都 -c copy 剪过(中间缺帧，不误判截断)", "exit 0" if code == 0 else out[-400:])
     longer = tmp / "fin_audio_longer.mp4"
     ff("-i", str(src), "-loop", "1", "-i", str(png), "-f", "lavfi", "-i", f"sine=f=330:d={DURATION + 0.4}",
        "-filter_complex", f"[0:v][1:v]overlay={_xy(spec)[0]}:{_xy(spec)[1]}:shortest=1[v]",
        "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
        *meta.ffmpeg_args(src, 0), str(longer))
     code, out = verify(longer, "--badge-spec", spec, "--source", str(src), "--max-duration", "10")
-    check(code == 0, "verify 正例·音轨比画面长 0.4 s(按视频流时长判截断，不用整体时长)", "exit 0" if code == 0 else out[-400:])
+    check(code == 0, "verify 正例·音轨比画面长 0.4 s(不误判截断)", "exit 0" if code == 0 else out[-400:])
     w7, h7 = 720, 1280
     png7 = tmp / "badge_720x1280.png"
     spec7 = json.loads(Path(str(png7) + ".json").read_text(encoding="utf-8"))
@@ -387,7 +387,8 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     expect_fail("变帧率终版在慢段(每秒 1 帧的 2–5 s)掉角标", gap_fin, "AI 角标像素", "--badge-spec", str(png7) + ".json",
                 "--source", str(gap_src), *dims(w7, h7))
     data = fin.read_bytes()
-    for label, cut in (("截掉后 60%", len(data) * 4 // 10), ("只剩 moov", data.find(b"mdat") + 4)):
+    for label, cut in (("只少最后 1 个字节", len(data) - 1), ("截掉后 60%", len(data) * 4 // 10),
+                       ("只剩 moov", data.find(b"mdat") + 4)):
         cut_file = tmp / f"neg_truncated_{cut}.mp4"
         cut_file.write_bytes(data[:cut])
         expect_fail(f"终版被截断({label})", cut_file, "AI 角标像素", "--badge-spec", spec, "--source", str(src),
