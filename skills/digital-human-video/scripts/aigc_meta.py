@@ -32,8 +32,9 @@ INK_SAFETY_PX = 2        # 渲染时墨迹再多留 2 px,吸收编码带来的�
 # 由封装器决定、和源片无关的键:比对时排除
 MUXER_KEYS = {"major_brand", "minor_version", "compatible_brands", "encoder"}
 BRAND_KEYS = ("major_brand", "minor_version", "compatible_brands")
-# 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「X;X」读出,值本身没变,比对前去重。
-# 源片本身就是「X;X」时原样映射过去,封装器解析不了,mvhd 的创建时间会被写成 0,所以 ffmpeg_args 显式写回去重值。
+# 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「mvhd 值;mdta 原串」读出,比对前按集合比。
+# 源片本身已带「;」(源片也是 use_metadata_tags 写的)时原样映射过去,封装器解析不了,mvhd 的创建时间会被写成 0,
+# 所以 ffmpeg_args 显式写回 mdta 原串(最后一段):终版读回来和源片逐字相同,mvhd 也保住。
 DUAL_STORED_KEYS = {"creation_time"}
 
 PRIVATE_KEYS = {"workflow", "prompt"}   # ComfyUI 原始输出自带,含工作流、模型名和提示词
@@ -85,9 +86,8 @@ def ffmpeg_args(source_path: str | Path | None, input_index: int | None) -> list
             raise ValueError(f"源片输入序号必须 ≥ 0,收到 {index}")
         mapping = ["-map_metadata", str(index)]
         for key in sorted(DUAL_STORED_KEYS & tags.keys()):
-            parts = set(tags[key].split(";"))
-            if len(parts) == 1 and ";" in tags[key]:
-                mapping += ["-metadata", f"{key}={parts.pop()}"]
+            if ";" in tags[key]:
+                mapping += ["-metadata", f"{key}={tags[key].split(';')[-1]}"]
     clear_brands = [a for k in BRAND_KEYS for a in ("-metadata", f"{k}=")]
     return mapping + clear_brands + ["-metadata", f"description={AI_DESCRIPTION}",
                                      "-movflags", "+faststart+use_metadata_tags"]
@@ -103,7 +103,11 @@ def compare(final: str | Path, source: str | Path) -> list[str]:
     """终版对源片的元数据核对,返回问题清单(空表示通过)。
     传错源片(终版自己、终版副本)时比对不出任何东西,先拦下来。"""
     src, fin = format_tags(source), format_tags(final)
-    if Path(source).resolve().samefile(Path(final).resolve()):
+    try:
+        same = Path(source).resolve().samefile(Path(final).resolve())
+    except OSError:   # ffprobe 打得开、文件系统 stat 不到(如 file: 前缀)的路径
+        same = False
+    if same:
         return ["源片与终版是同一个文件,比对不出任何东西;--source 请传出片前的源片"]
     if any(k.lower() == "description" for k in src):
         return ["源片带 description 键,不像源片(源片带 description 时 ffmpeg_args 会拒绝出片);请传出片前的源片"]
@@ -177,7 +181,12 @@ def _main(argv: list[str]) -> int:
             print("[PASS] 源元数据保留、说明字段两要素、brand 三键无重复值")
         return 1 if problems else 0
     if len(argv) >= 3 and argv[0] == "sidecar":
-        if write_sidecar(argv[1], argv[2:]):
+        try:
+            differs = write_sidecar(argv[1], argv[2:])
+        except RuntimeError as exc:
+            print(f"aigc_meta.py: ⛔ {exc}", file=sys.stderr)
+            return 2
+        if differs:
             print(f"⚠️ 各片段源文件的元数据不同:容器里只保留第一段的,全部片段见 {argv[1]}(本地留存,不上传)")
         return 0
     print(__doc__, file=sys.stderr)

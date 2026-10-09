@@ -24,6 +24,7 @@ AIGC_META_PATH = Path(__file__).resolve().parents[2] / "digital-human-video/scri
 # ② 字形与底框的亮度中位数差 ≥ 40。只有 ① 不够:纯白画面上没有角标也能过 ①。
 GLYPH_ALPHA_MIN = 200   # 角标 PNG 里 alpha ≥ 200 的像素是字形,腐蚀 1 px 后作字形掩码
 BOX_ALPHA_MAX = 100     # 0 < alpha ≤ 100 是底框
+GLYPH_INK_ALPHA = 158   # 量 PNG 实际字高:底框 95、白字 220,alpha > 157.5 即字形覆盖过半,和渲染时「L 模式 >128」同一口径
 GLYPH_LUMA_MIN = 170
 GLYPH_RATIO_MIN = 0.95
 GLYPH_BOX_CONTRAST_MIN = 40
@@ -193,6 +194,7 @@ def check_video(args: argparse.Namespace, report: Report) -> float | None:
         "width": video.get("width") if video else None,
         "height": video.get("height") if video else None,
         "fps": frame_rate_of(video) if video else None,
+        "nb_frames": as_float(video.get("nb_frames")) if video else None,
         "audio_codec": audio.get("codec_name") if audio else None,
         "sample_rate": audio.get("sample_rate") if audio else None,
         "channels": audio.get("channels") if audio else None,
@@ -407,8 +409,13 @@ def median(values: list[int]) -> float:
     return float(ordered[middle]) if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
 
 
-def badge_frames(video: Path, x: int, y: int, w: int, h: int, fps: float):
-    """只解角标区域（crop），逐帧读灰度；产出第 0 帧、之后每 1 秒一帧、末帧。"""
+def png_ink_height(alpha: bytes, width: int) -> int:
+    rows = [r for r in range(len(alpha) // width) if max(alpha[r * width:(r + 1) * width]) >= GLYPH_INK_ALPHA]
+    return rows[-1] - rows[0] + 1 if rows else 0
+
+
+def badge_frames(video: Path, x: int, y: int, w: int, h: int, fps: float) -> tuple[list[tuple[int, bytes]], int]:
+    """只解角标区域（crop），逐帧读灰度；返回（第 0 帧、之后每 1 秒一帧、末帧，解出的总帧数）。"""
     process = subprocess.Popen(
         [
             "ffmpeg", "-v", "error", "-i", str(video), "-map", "0:v:0",
@@ -419,6 +426,7 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int, fps: float):
         stderr=subprocess.DEVNULL,
     )
     size = w * h
+    picked: list[tuple[int, bytes]] = []
     index, next_second, last = 0, 1, None
     assert process.stdout is not None
     while True:
@@ -428,7 +436,7 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int, fps: float):
         if index == 0 or index >= round(next_second * fps):
             if index:
                 next_second = math.floor(index / fps) + 1
-            yield index, frame
+            picked.append((index, frame))
             last = None
         else:
             last = (index, frame)
@@ -436,7 +444,8 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int, fps: float):
     process.stdout.close()
     process.wait()
     if last is not None:
-        yield last
+        picked.append(last)
+    return picked, index
 
 
 def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: bool) -> None:
@@ -461,10 +470,12 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
 
     need = meta.min_glyph_px(width, height)
     ink, font_size = spec.get("ink_height_px"), spec.get("font_size")
-    if isinstance(ink, int) and isinstance(font_size, int) and ink >= need and font_size >= need:
-        report.passed("AI 角标字高", f"墨迹 {ink}px、字号 {font_size}，下限 {need}px（最短边 5%）")
+    if not (isinstance(ink, int) and ink >= need):
+        fail("AI 角标字高", f"几何 JSON 记的墨迹 {ink}px，低于下限 {need}px（最短边 5%）")
+    elif not (isinstance(font_size, int) and font_size >= need):
+        fail("AI 角标字高", f"几何 JSON 记的字号 {font_size}，低于下限 {need}px（最短边 5%）")
     else:
-        fail("AI 角标字高", f"墨迹 {ink}px、字号 {font_size}，下限 {need}px（最短边 5%）")
+        report.passed("AI 角标字高", f"几何 JSON：墨迹 {ink}px、字号 {font_size}，下限 {need}px（最短边 5%）")
 
     text = spec.get("text", "")
     if text in meta.RETIRED_BADGE_TEXTS:
@@ -486,23 +497,32 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
     if alpha is None:
         fail("AI 角标像素", f"读不了角标 PNG {png}，或尺寸不是 {w}x{h}")
         return
+    measured = png_ink_height(alpha, w)
+    if measured < need:
+        fail("AI 角标字高", f"角标 PNG 实测字高 {measured}px，低于下限 {need}px（不只信 JSON 自报）")
+    else:
+        report.passed("AI 角标字高", f"角标 PNG 实测字高 {measured}px ≥ {need}px")
     glyph, box = badge_masks(alpha, w, h)
     fps = video.get("fps") or 25.0
     if not glyph or not box:
         fail("AI 角标像素", "角标 PNG 里取不出字形或底框掩码")
         return
+    picked, decoded = badge_frames(args.video.resolve(), x, y, w, h, fps)
+    declared = video.get("nb_frames") or round((video.get("duration") or 0) * fps)
+    declared = int(declared)
+    if decoded == 0 or decoded < declared - max(2, declared // 50):
+        fail("AI 角标像素", f"终版只解出 {decoded} 帧，容器声明 {declared} 帧（文件可能被截断），角标全程无从核起")
+        return
     bad: list[str] = []
     checked = 0
-    for index, frame in badge_frames(args.video.resolve(), x, y, w, h, fps):
+    for index, frame in picked:
         checked += 1
         glyph_values = [frame[i] for i in glyph]
         ratio = sum(value >= GLYPH_LUMA_MIN for value in glyph_values) / len(glyph_values)
         contrast = median(glyph_values) - median([frame[i] for i in box])
         if ratio < GLYPH_RATIO_MIN or contrast < GLYPH_BOX_CONTRAST_MIN:
             bad.append(f"第 {index} 帧（{index / fps:.2f}s）亮字占比 {ratio:.1%}、字形−底框 {contrast:.0f}")
-    if checked == 0:
-        fail("AI 角标像素", "终版解不出任何帧")
-    elif bad:
+    if bad:
         fail("AI 角标像素", f"{len(bad)}/{checked} 帧不像有角标：" + "；".join(bad[:5]))
     else:
         report.passed("AI 角标像素", f"{checked} 帧（第 0 帧、每秒一帧、末帧）都检出角标")

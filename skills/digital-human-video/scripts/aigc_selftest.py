@@ -7,9 +7,10 @@
   1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅,解码第 0 帧、
      1 s、2 s、末帧实测字形高;位置贴角;深浅两种底色过 verify_package 的像素判据;
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
-     description 冲突护栏、普通(非 mdta)源片的 creation_time;compose.sh 端到端(多段不同元数据、
-     /bin/bash 3.2 下的冲突用例);
-  3. verify_package.py:正例 exit 0;不叠角标、角标只在开头/中段掉了/末尾掉了、淡角标、旧角标、画幅不符、
+     description 冲突护栏、creation_time(普通源片、mdta 源片「X;X」与「A;B」都不让 mvhd 归零、真被改仍判变)、
+     封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、/bin/bash 3.2 下的冲突用例);
+  3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
+     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断、画幅不符、
      缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
      脱离插件目录找不到 aigc_meta.py 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN;
      aigc_meta.py check 命令行同样拦得住传错的 --source 和缺说明字段。
@@ -198,6 +199,11 @@ def section_badge(tmp: Path) -> dict:
                 check(all(v >= need for v in inks.values()), f"{w}x{h} 实测字形高 ≥ {need}", json.dumps(inks))
             code, out = verify(fin, "--badge-spec", str(png) + ".json", "--source", str(src), *dims(w, h))
             check(code == 0, f"verify 正例·{w}x{h} 底色 {bg}", "exit 0" if code == 0 else out[-600:])
+    try:
+        rt.badge(str(tmp / "bad_anchor.png"), width=1080, height=1920, anchor="TR")
+        check(False, "anchor 只认小写 tr/tl/br/bl")
+    except ValueError:
+        check(True, "anchor 只认小写 tr/tl/br/bl")
     for anchor in ("tl", "br", "bl"):
         s = rt.badge(str(tmp / f"a_{anchor}.png"), width=1080, height=1920, anchor=anchor)
         left, top = s["x"], s["y"]
@@ -242,6 +248,8 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     stripped = overlay(src, png, *_xy(spec), tmp / "neg_stripped.mp4",
                        STRIP_ALL + ["-metadata", f"description={meta.AI_DESCRIPTION}"])
     expect_fail("源键丢失", stripped, "源元数据保留", "--badge-spec", spec, "--source", str(src))
+    late_start = overlay(src, png, *_xy(spec), tmp / "neg_badge_late_start.mp4", meta.ffmpeg_args(src, 0), "gte(t,0.2)")
+    expect_fail("角标 0.2 s 才出现(首帧没有)", late_start, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     early = overlay(src, png, *_xy(spec), tmp / "neg_badge_early_only.mp4", meta.ffmpeg_args(src, 0), "lt(t,0.5)")
     expect_fail("角标只在开头 0.5 s", early, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     middle = overlay(src, png, *_xy(spec), tmp / "neg_badge_gap_middle.mp4", meta.ffmpeg_args(src, 0),
@@ -289,6 +297,35 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     clash = tmp / "src_desc.mp4"
     expect_fail("--source 带 description", fin, "源元数据保留", "--badge-spec", spec, "--source", str(clash),
                 detail="带 description")
+    base_spec = json.loads(Path(spec).read_text(encoding="utf-8"))
+    for n, (label, change, item, needle) in enumerate((
+        ("几何 JSON 墨迹不足", {"ink_height_px": 40}, "AI 角标字高", "墨迹"),
+        ("几何 JSON 字号不足", {"font_size": 40}, "AI 角标字高", "字号"),
+        ("措辞只有 AI 没有生成", {"text": "视频由 AI 打造"}, "AI 角标措辞", "缺两要素"),
+        ("措辞只有生成没有 AI", {"text": "画面由算法生成"}, "AI 角标措辞", "缺两要素"),
+    )):
+        bad_spec = tmp / f"spec_bad_{n}.png.json"
+        bad_spec.write_text(json.dumps(dict(base_spec, **change), ensure_ascii=False), encoding="utf-8")
+        expect_fail(label, fin, item, "--badge-spec", str(bad_spec), "--source", str(src), detail=needle)
+    _, old_fin, old_png = samples["old"]
+    ow, oh = Image.open(old_png).size
+    liar = tmp / "liar_old_badge.png.json"
+    liar.write_text(json.dumps(dict(base_spec, x=1080 - ow - 40, y=60, w=ow, h=oh, png=old_png.name)), encoding="utf-8")
+    expect_fail("JSON 自报够、PNG 实测不够", old_fin, "AI 角标字高", "--badge-spec", str(liar), "--source", str(src),
+                detail="实测字高")
+    one_elem = overlay(src, png, *_xy(spec), tmp / "neg_desc_one_element.mp4",
+                       ["-map_metadata", "0", "-metadata", "major_brand=", "-metadata", "minor_version=",
+                        "-metadata", "compatible_brands=", "-metadata", "description=本视频由 AI 辅助完成",
+                        "-movflags", "+faststart+use_metadata_tags"])
+    expect_fail("说明字段只有 AI 没有生成", one_elem, "说明字段", "--badge-spec", spec, "--source", str(src))
+    cli = meta_cli("check", str(one_elem), "--source", str(src))
+    check(cli.returncode == 1 and "description" in cli.stdout, "CLI check·说明字段缺一要素", f"exit={cli.returncode}")
+    data = fin.read_bytes()
+    for label, cut in (("截掉后 60%", len(data) * 4 // 10), ("只剩 moov", data.find(b"mdat") + 4)):
+        cut_file = tmp / f"neg_truncated_{cut}.mp4"
+        cut_file.write_bytes(data[:cut])
+        expect_fail(f"终版被截断({label})", cut_file, "AI 角标像素", "--badge-spec", spec, "--source", str(src),
+                    detail="截断")
     covers = []
     for name, size in (("cover_v.png", (1080, 1440)), ("cover_b.png", (1440, 1080)), ("cover_y.png", (1080, 1920))):
         Image.new("RGB", size, (20, 20, 20)).save(tmp / name)
@@ -359,6 +396,30 @@ def section_metadata(tmp: Path, samples: dict) -> None:
     src_ct, out_ct = mvhd_creation_time(mdta_ct), mvhd_creation_time(mdta_out)
     check(src_ct != 0 and out_ct == src_ct and not meta.compare(mdta_out, mdta_ct),
           "mdta 源片的 creation_time:mvhd 创建时间不被写成 0", f"源 {src_ct} 终 {out_ct}")
+    for label, value in (("不带微秒", "2026-08-04T12:34:56Z"), ("带小数秒", "2026-08-04T12:34:56.5Z")):
+        ab = make_src(tmp / f"src_ab_{len(value)}.mp4", 320, 240, DARK, {"creation_time": value}, dur=1)
+        ab_out = tmp / f"meta_ab_{len(value)}.mp4"
+        ff("-i", str(ab), "-c", "copy", *meta.ffmpeg_args(ab, 0), str(ab_out))
+        same = meta.format_tags(ab_out).get("creation_time") == meta.format_tags(ab).get("creation_time")
+        check(";" in meta.format_tags(ab)["creation_time"] and mvhd_creation_time(ab_out) == mvhd_creation_time(ab) != 0
+              and same and not meta.compare(ab_out, ab),
+              f"mdta 源片 creation_time 读成「A;B」({label}):mvhd 不归零、读回逐字相同",
+              f"{meta.format_tags(ab)['creation_time']} → mvhd {mvhd_creation_time(ab_out)}")
+    brand = tmp / "src_brand_mp42.mp4"
+    ff("-f", "lavfi", "-i", "color=c=0x202020:s=320x240:d=1:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+       "-brand", "mp42", "-metadata", "title=brand", str(brand))
+    brand_out = tmp / "meta_brand_mp42.mp4"
+    ff("-i", str(brand), "-c", "copy", *meta.ffmpeg_args(brand, 0), str(brand_out))
+    src_b, out_b = meta.format_tags(brand).get("major_brand"), meta.format_tags(brand_out).get("major_brand")
+    check(src_b != out_b and not meta.compare(brand_out, brand), "封装器键(brand)源片与终版不同时不误报",
+          f"{src_b} → {out_b}")
+    win = make_src(tmp / "src_winpath.mp4", 320, 240, DARK, {"comment": "D:\\ComfyUI\\output\\clip.mp4"}, dur=1)
+    check(any("Windows" in f for f in meta.privacy_flags(win)), "privacy_flags 提示 Windows 盘符路径")
+    side = meta_cli("sidecar", str(tmp / "side.json"), str(tmp / "nope.mp4"))
+    check(side.returncode == 2 and "Traceback" not in side.stderr, "CLI sidecar 读不了文件时退出码 2、不抛 traceback")
+    cli = meta_cli("check", str(mdta_out), "--source", f"file:{mdta_ct}")
+    check("Traceback" not in cli.stderr and cli.returncode in (0, 1), "CLI check 的 --source 带 file: 前缀不抛 traceback",
+          f"exit={cli.returncode}")
     try:
         meta.ffmpeg_args(src, -1)
         check(False, "ffmpeg_args 拒绝负的输入序号")
@@ -422,6 +483,21 @@ def section_compose(tmp: Path) -> None:
     check(all(v >= 54 for v in inks.values()), "compose 成片实测字形高 ≥ 54", json.dumps(inks))
     code, report = verify(out, "--badge-spec", str(spec_path), "--source", str(work / "dh1.mp4"))
     check(code == 0, "verify 正例·compose 成片", "exit 0" if code == 0 else report[-600:])
+
+    cards = tmp / "compose_cards"
+    cards.mkdir()
+    Image.new("RGB", (1080, 1920), (40, 60, 90)).save(cards / "card.png")
+    ff("-f", "lavfi", "-i", "sine=f=330:d=1", str(cards / "card.wav"))
+    (cards / "s1.txt").write_text("只有图卡", encoding="utf-8")
+    (cards / "segments.txt").write_text("card card.png card.wav s1.txt\ncard card.png card.wav s1.txt\n", encoding="utf-8")
+    cards_out = tmp / "compose_cards.mp4"
+    run3 = subprocess.run([bash, str(HERE / "compose.sh"), str(cards), str(cards_out)],
+                          capture_output=True, text=True, check=False)
+    tags = meta.format_tags(cards_out) if cards_out.is_file() else {}
+    check(run3.returncode == 0 and tags.get("description") == meta.AI_DESCRIPTION
+          and all(";" not in tags.get(k, "") for k in meta.BRAND_KEYS)
+          and not Path(str(cards_out) + ".source-metadata.json").exists(),
+          "compose 全是图卡:出片、带说明字段、brand 无重复值、不写 sidecar", f"exit={run3.returncode}")
 
     work2 = tmp / "compose_clash"
     build(work2, dict(SRC_TAGS, description="SRCDESC"))

@@ -168,7 +168,7 @@ ffprobe -v error -show_entries format=duration -show_entries stream=codec_name,s
 - 源片已有 `description` 时 `ffmpeg_args` 直接报错、不覆盖，交人处理。
 - `workflow`／`prompt` 键可能带工作流、模型文件名和提示词：按原样保留，`verify_package.py` 只报 WARN 提示，发不发由人决定。
 - 多段拼接时一个文件只留一份隐式标识：容器保留第一段源文件的元数据，全部片段的元数据写进本地 `<终版.mp4>.source-metadata.json`（不上传）。`compose.sh` 自动做这一步；逐镜头源片在本技能里拼接时，`ffmpeg_args` 和验收的 `--source` 都用第一个镜头的源文件，再跑 `python3 <playbook 仓根>/skills/digital-human-video/scripts/aigc_meta.py sidecar <终版.mp4>.source-metadata.json <镜头1.mp4> <镜头2.mp4> …`，各镜头不同时它打印 ⚠️。单条完整源片就用它本身。
-- 带 `use_metadata_tags` 后所有键都写进 mdta `keys` 盒，只认 iTunes 风格 `©nam`、`desc` 的读取器读不到标题和说明，这是已知取舍；ffprobe 两种都能读。`creation_time` 同时写在 mvhd 和 mdta 里，ffprobe 会读成「X;X」，值没变：`ffmpeg_args` 把去重后的值显式写回（否则 mvhd 的创建时间会被写成 0），`compare` 比对时去重。
+- 带 `use_metadata_tags` 后所有键都写进 mdta `keys` 盒，只认 iTunes 风格 `©nam`、`desc` 的读取器读不到标题和说明，这是已知取舍；ffprobe 两种都能读。`creation_time` 同时写在 mvhd 和 mdta 里，ffprobe 会读成「mvhd 值;mdta 原串」。普通源片照常映射即可；源片本身已读成带「;」的形式（它也是带 `use_metadata_tags` 写的）时，`ffmpeg_args` 显式写回 mdta 原串，否则 mvhd 的创建时间会被写成 0。`compare` 对这个键按集合比。
 
 示例（路径都是占位符）：
 
@@ -266,7 +266,7 @@ python3 scripts/verify_package.py \
   --target-lufs -14 --lufs-tolerance 2
 ```
 
-脚本不修改源视频或封面，但 `--frames-dir` 会创建/覆盖抽帧，`--json-out` 会写报告；严格只读审计时省略这两个参数。默认的 1080×1920、H.264/AAC 与三版平台封面尺寸是智码航当前交付规格；项目规格不同时显式传参或只做对应检查。脚本能机检角标尺寸、位置、全程出现和措辞常量（按 `--badge-spec` 的几何与角标 PNG 逐秒比对像素），以及源元数据保留和说明字段，**不能 OCR**；缺 `--badge-spec` 或 `--source` 直接 FAIL（「AI 角标未机检」「源元数据保留未核」）。只读审计已发布旧片时加 `--legacy-audit`，这几项降为 WARN，不能据此写 `FINAL_QA_PASS`。脚本不能识别字幕语义、辅助素材是否匹配讲解、字幕动效是否合适、版权或口型，这些项目必须实际观看核对。
+脚本不修改源视频或封面，但 `--frames-dir` 会创建/覆盖抽帧，`--json-out` 会写报告；严格只读审计时省略这两个参数。默认的 1080×1920、H.264/AAC 与三版平台封面尺寸是智码航当前交付规格；项目规格不同时显式传参或只做对应检查。脚本能机检角标尺寸（几何 JSON 与角标 PNG 实测字高都要达标）、位置、全程出现（第 0 帧、每秒一帧、末帧逐一比对像素，解出的帧数少于容器声明即判截断）和措辞常量，以及源元数据保留和说明字段，**不能 OCR**；缺 `--badge-spec` 或 `--source` 直接 FAIL（「AI 角标未机检」「源元数据保留未核」）。只读审计已发布旧片时加 `--legacy-audit`，这几项降为 WARN，不能据此写 `FINAL_QA_PASS`。脚本不能识别字幕语义、辅助素材是否匹配讲解、字幕动效是否合适、版权或口型，这些项目必须实际观看核对。
 
 人工必须完成：
 
