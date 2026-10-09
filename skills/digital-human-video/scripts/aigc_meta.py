@@ -80,7 +80,7 @@ def format_tags(path: str | Path) -> dict[str, str]:
     """ffprobe 读容器级元数据(format.tags)。读不了就抛错,不当作「没有元数据」。"""
     result = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format_tags", "-of", "json", str(path)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, stdin=subprocess.DEVNULL,
     )
     if result.returncode != 0:
         raise RuntimeError(f"ffprobe 读不了 {path}: {result.stderr.strip() or result.returncode}")

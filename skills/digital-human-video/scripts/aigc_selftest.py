@@ -7,7 +7,7 @@
   1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅解码第 0 帧、
      1 s、2 s、末帧实测字形高、字高下限正好 5%、1080x1920 几何不漂;位置贴角;深浅两种底色过
      verify_package 的像素判据;另有 432x768／360x640／540x960／610x1084 小画幅的 verify 正反例;
-  2. 元数据:源片键逐字保留(含非标准键)、说明字段、两要素判定、隐私提示(workflow／prompt／本机路径,不误报网址)、brand 三键无重复值、源片在第 0/1 路、
+  2. 元数据:源片键逐字保留(含非标准键)、说明字段、两要素判定、隐私提示(workflow／prompt 含 Matroska 大写键名、本机路径,不误报网址)、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏(含 Matroska 大写键名)、creation_time(普通源片、mdta 源片「X;X」与「A;B」
      都不让 mvhd 归零、原串是 now、带时区原串逐字保留、不存在的时间不崩溃、MKV 小数秒、真被改仍判变)、
      封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、首段是 clip、
@@ -19,7 +19,8 @@
      措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧、画幅不符、缺说明字段、
      源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、脱离插件目录
      找不到 aigc_meta.py;--legacy-audit 降为 WARN;aigc_meta.py check 命令行同样拦得住传错的 --source
-     和缺说明字段。
+     和缺说明字段;
+  4. verify／aigc_meta 调 ffmpeg、ffprobe 时都断开 stdin(否则 stdin 里的 q 会让它只核前半段)。
 样本里的 AIGC 键只用假值(example-producer / test-000N),只为验证「原样保留」。
 """
 from __future__ import annotations
@@ -371,7 +372,7 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     other_text = tmp / "spec_other_text.png.json"
     other_text.write_text(json.dumps(dict(base_spec, text="视频含 AI 合成画面"), ensure_ascii=False), encoding="utf-8")
     code, out = verify(fin, "--badge-spec", str(other_text), "--source", str(src))
-    check(code == 0 and "[PASS] AI 角标措辞:" in out and "与措辞常量" in out,
+    check(code == 0 and "[PASS] AI 角标措辞:" in out and "[WARN] AI 角标措辞: 与措辞常量" in out,
           "角标措辞含两要素但不是措辞常量:PASS 并 WARN 提示", f"exit={code}")
     _, old_fin, old_png = samples["old"]
     ow, oh = Image.open(old_png).size
@@ -683,6 +684,14 @@ def section_metadata(tmp: Path, samples: dict) -> None:
     check(not meta.write_sidecar(tmp / "mixed.json", [mkv, plain_mp4]), "sidecar:MKV 与 MP4 源片只差封装器键时不报「各段不同」")
     win = make_src(tmp / "src_winpath.mp4", 320, 240, DARK, {"comment": "D:\\ComfyUI\\output\\clip.mp4"}, dur=1)
     check(any("Windows" in f for f in meta.privacy_flags(win)), "privacy_flags 提示 Windows 盘符路径")
+    mkv_priv = tmp / "src_private.mkv"
+    ff("-f", "lavfi", "-i", f"color=c={DARK}:s=320x240:d=1:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+       "-metadata", f"workflow={SRC_TAGS['workflow']}", "-metadata", f"prompt={SRC_TAGS['prompt']}", str(mkv_priv))
+    mkv_priv_out = tmp / "meta_private_from_mkv.mp4"
+    ff("-i", str(mkv_priv), "-c", "copy", *meta.ffmpeg_args(mkv_priv, 0), str(mkv_priv_out))
+    flags = meta.privacy_flags(mkv_priv_out)
+    check("WORKFLOW" in meta.format_tags(mkv_priv) and any("WORKFLOW" in f for f in flags) and any("PROMPT" in f for f in flags),
+          "Matroska 源片的 WORKFLOW／PROMPT(大写键名)也报隐私提示", "; ".join(flags))
     mac = make_src(tmp / "src_macpath.mp4", 320, 240, DARK, {"comment": "/Users/example/ComfyUI/output/clip.mp4"}, dur=1)
     check(any("/Users/" in f for f in meta.privacy_flags(mac)), "privacy_flags 提示本机 /Users/ 路径(示例为虚构路径)")
     url = make_src(tmp / "src_url.mp4", 320, 240, DARK, {"comment": "see https://example.com/workflow"}, dur=1)
@@ -730,6 +739,37 @@ def section_metadata(tmp: Path, samples: dict) -> None:
     cli = subprocess.run([sys.executable, str(HERE / "aigc_meta.py"), "args", str(clash), "0"],
                          capture_output=True, text=True, check=False)
     check(cli.returncode != 0 and not cli.stdout.strip(), "冲突护栏:CLI args 非零退出且不输出参数")
+
+
+def section_stdin(tmp: Path, samples: dict) -> None:
+    """verify／aigc_meta 调 ffmpeg、ffprobe 时 stdin 必须断开:ffmpeg 会把 stdin 当键盘指令(q 提前收工却退出 0,
+    只核了前半段就判 PASS),批量 `while read` 时还会吃掉循环的输入。读不读 stdin 取决于解码快慢,行为测不稳,
+    这里直接看每次调子进程时传没传 stdin=DEVNULL。"""
+    print("\n== 4. 子进程 stdin ==")
+    spec_v = importlib.util.spec_from_file_location("verify_package_under_test", VERIFY)
+    vp = importlib.util.module_from_spec(spec_v)
+    sys.modules[spec_v.name] = vp
+    spec_v.loader.exec_module(vp)
+    src, fin, png = samples[(1080, 1920, DARK)]
+    spec = json.loads(Path(str(png) + ".json").read_text(encoding="utf-8"))
+    seen: list[tuple[str, object]] = []
+    real_run = subprocess.run
+
+    def spy(cmd, *args, **kwargs):
+        seen.append((Path(str(cmd[0])).name, kwargs.get("stdin")))
+        return real_run(cmd, *args, **kwargs)
+
+    subprocess.run = spy
+    try:
+        vp.probe(fin)
+        vp.png_alpha(png, spec["w"], spec["h"])
+        vp.badge_frames(fin, spec["x"], spec["y"], spec["w"], spec["h"])
+        meta.format_tags(fin)
+    finally:
+        subprocess.run = real_run
+    leaked = [name for name, stdin in seen if name in ("ffmpeg", "ffprobe") and stdin is not subprocess.DEVNULL]
+    check(len(seen) >= 4 and not leaked, "verify／aigc_meta 调 ffmpeg、ffprobe 时都断开 stdin",
+          f"{len(seen)} 次调用,没断开的: {leaked}")
 
 
 def section_compose(tmp: Path) -> None:
@@ -846,7 +886,8 @@ def main() -> int:
         for name, run in (("1. 角标", lambda: samples.update(section_badge(tmp))),
                           ("2. 元数据", lambda: section_metadata(tmp, samples)),
                           ("2b. compose.sh", lambda: section_compose(tmp)),
-                          ("3. verify 反例", lambda: section_verify_negatives(tmp, samples))):
+                          ("3. verify 反例", lambda: section_verify_negatives(tmp, samples)),
+                          ("4. 子进程 stdin", lambda: section_stdin(tmp, samples))):
             try:
                 run()
             except Exception as exc:  # noqa: BLE001 - 一节抛异常也要记成具名 FAIL,别的节照跑

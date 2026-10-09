@@ -96,7 +96,8 @@ class Report:
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, text=True, capture_output=True, check=False)
+    # stdin 一律断开:ffmpeg 会把 stdin 当键盘指令读(q 提前收工却照样退出 0),批量 `while read` 时还会吃掉循环的输入
+    return subprocess.run(command, text=True, capture_output=True, check=False, stdin=subprocess.DEVNULL)
 
 
 def require_binary(name: str, report: Report) -> bool:
@@ -391,6 +392,7 @@ def png_alpha(path: Path, width: int, height: int) -> bytes | None:
         ["ffmpeg", "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
         capture_output=True,
         check=False,
+        stdin=subprocess.DEVNULL,
     )
     if result.returncode != 0 or len(result.stdout) != width * height * 4:
         return None
@@ -450,6 +452,7 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tupl
                     "-vf", f"format=gray,crop={w}:{h}:{x}:{y},showinfo", "-f", "rawvideo", "-pix_fmt", "gray",
                     "-y", str(raw),
                 ],
+                stdin=subprocess.DEVNULL,   # 理由同 run():读到 q 会只核前半段却照样「PASS」
                 stdout=subprocess.DEVNULL,
                 stderr=err,
                 check=False,
