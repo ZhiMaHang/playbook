@@ -512,17 +512,10 @@ def check_source_metadata(video: Path, source: Path, meta: Any, report: Report, 
     if not source.is_file():
         fail("源元数据保留", f"源片不存在: {source}")
         return
-    if source.samefile(video):
-        fail("源元数据保留", "--source 与 --video 是同一个文件，比对不出任何东西；请传出片前的源片")
-        return
     try:
-        source_tags = meta.format_tags(source)
-        problems = meta.compare(video, source)
+        problems = meta.compare(video, source)  # 含「传了终版自己／终版副本」两道拦截
     except RuntimeError as exc:
         fail("源元数据保留", str(exc))
-        return
-    if any(key.lower() == "description" for key in source_tags):
-        fail("源元数据保留", "--source 带 description 键，不像源片（源片带 description 时 ffmpeg_args 会拒绝出片）；请传出片前的源片")
         return
     for problem in problems:
         fail("源元数据保留", problem)

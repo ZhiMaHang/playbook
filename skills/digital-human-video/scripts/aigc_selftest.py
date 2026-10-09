@@ -10,8 +10,9 @@
      description 冲突护栏、普通(非 mdta)源片的 creation_time;compose.sh 端到端(多段不同元数据、
      /bin/bash 3.2 下的冲突用例);
   3. verify_package.py:正例 exit 0;不叠角标、角标只在开头/中段掉了/末尾掉了、淡角标、旧角标、画幅不符、
-     缺说明字段、源键丢失/被改/brand 重复值、--source 传错、缺 --badge-spec、缺 --source 都必须
-     FAIL 并点名检查项;--legacy-audit 降为 WARN。
+     缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
+     脱离插件目录找不到 aigc_meta.py 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN;
+     aigc_meta.py check 命令行同样拦得住传错的 --source 和缺说明字段。
 样本里的 AIGC 键只用假值(example-producer / test-000N),只为验证「原样保留」。
 """
 from __future__ import annotations
@@ -20,6 +21,7 @@ import importlib.util
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -118,6 +120,17 @@ def ink_heights(video: Path, x: int, y: int, w: int, h: int) -> dict[str, int]:
         rows = [r for r in range(h) if max(frame[r * w:(r + 1) * w]) > 128]
         out[label] = rows[-1] - rows[0] + 1 if rows else 0
     return out
+
+
+def mvhd_creation_time(path: Path) -> int:
+    """mvhd 盒里的创建时间(1904 年起的秒数);0 表示被写成了空值。"""
+    data = path.read_bytes()
+    i = data.find(b"mvhd")
+    return struct.unpack(">Q", data[i + 8:i + 16])[0] if data[i + 4] == 1 else struct.unpack(">I", data[i + 8:i + 12])[0]
+
+
+def meta_cli(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(HERE / "aigc_meta.py"), *args], capture_output=True, text=True, check=False)
 
 
 def old_badge(out: Path) -> tuple[int, int]:
@@ -232,8 +245,8 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     early = overlay(src, png, *_xy(spec), tmp / "neg_badge_early_only.mp4", meta.ffmpeg_args(src, 0), "lt(t,0.5)")
     expect_fail("角标只在开头 0.5 s", early, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     middle = overlay(src, png, *_xy(spec), tmp / "neg_badge_gap_middle.mp4", meta.ffmpeg_args(src, 0),
-                     "not(between(t,0.9,2.1))")
-    expect_fail("中段 0.9–2.1 s 掉角标(首末帧都在)", middle, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
+                     "not(between(t,0.9,1.1))")
+    expect_fail("中段 0.9–1.1 s 掉角标(只有 1 s 那一帧抽得到)", middle, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     late = overlay(src, png, *_xy(spec), tmp / "neg_badge_drops_at_end.mp4", meta.ffmpeg_args(src, 0), "lt(t,2.8)")
     expect_fail("末尾 0.2 s 掉角标", late, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     faint_png = tmp / "faint_badge.png"
@@ -255,6 +268,24 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     shutil.copyfile(fin, fin_copy)
     expect_fail("--source 传了终版的副本", fin, "源元数据保留", "--badge-spec", spec, "--source", str(fin_copy),
                 detail="带 description")
+    for label, source, needle in (("终版自己", fin, "同一个文件"), ("终版副本", fin_copy, "带 description")):
+        cli = meta_cli("check", str(fin), "--source", str(source))
+        check(cli.returncode == 1 and needle in cli.stdout, f"CLI check·--source 传了{label}", f"exit={cli.returncode}")
+    cli = meta_cli("check", str(no_desc), "--source", str(src))
+    check(cli.returncode == 1 and "description" in cli.stdout, "CLI check·终版缺说明字段", f"exit={cli.returncode}")
+    expect_fail("--source 文件不存在", fin, "源元数据保留", "--badge-spec", spec, "--source", str(tmp / "nope.mp4"),
+                detail="源片不存在")
+    garbage = tmp / "garbage.mp4"
+    garbage.write_bytes(b"not a video" * 100)
+    expect_fail("--source 读不了", fin, "源元数据保留", "--badge-spec", spec, "--source", str(garbage),
+                detail="读不了")
+    alone = tmp / "alone"
+    alone.mkdir()
+    shutil.copy(VERIFY, alone / VERIFY.name)
+    run = subprocess.run([sys.executable, str(alone / VERIFY.name), "--video", str(fin), "--badge-spec", spec,
+                          "--source", str(src)], capture_output=True, text=True, check=False)
+    check(run.returncode != 0 and "[FAIL] aigc_meta.py:" in run.stdout, "verify 脱离插件目录、找不到 aigc_meta.py 时 FAIL",
+          f"exit={run.returncode}")
     clash = tmp / "src_desc.mp4"
     expect_fail("--source 带 description", fin, "源元数据保留", "--badge-spec", spec, "--source", str(clash),
                 detail="带 description")
@@ -267,7 +298,8 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     lines = [line for line in out.splitlines() if line.startswith("- ")]
     first = next((i for i, line in enumerate(lines) if "确认第一句实际口播" in line), -1)
     cover = next((i for i, line in enumerate(lines) if "三版平台封面" in line), -1)
-    check(code == 0 and 0 <= first < cover, "人工清单:封面条目仍排在「第一句」条目之后", f"exit={code} 位置 {first}/{cover}")
+    check(code == 0 and first >= 0 and cover == first + 1, "人工清单:封面条目紧跟在「第一句」条目之后",
+          f"exit={code} 位置 {first}/{cover}")
     expect_fail("缺 --badge-spec", fin, "AI 角标未机检", "--source", str(src))
     expect_fail("缺 --source", fin, "源元数据保留未核", "--badge-spec", spec)
 
@@ -277,6 +309,9 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     check(code == 0 and "[WARN] AI 角标未机检" in out and "[WARN] 说明字段" in out
           and "[WARN] 源元数据保留未核" in out and "[FAIL]" not in out,
           "旧片带 --legacy-audit:新增项降为 WARN、exit 0", f"exit={code}")
+    code, out = verify(legacy, "--legacy-audit", "--source", str(src))
+    check(code == 0 and "[WARN] 源元数据保留:" in out and "[FAIL]" not in out,
+          "旧片带 --legacy-audit 和 --source:源键丢失也只报 WARN", f"exit={code}")
 
 
 def _xy(spec_path: str) -> tuple[int, int]:
@@ -312,6 +347,18 @@ def section_metadata(tmp: Path, samples: dict) -> None:
     ff("-i", str(plain), "-c", "copy", *meta.ffmpeg_args(plain, 0), str(plain_out))
     problems = meta.compare(plain_out, plain)
     check(not problems, "普通源片的 creation_time(终版读成 X;X)compare 不误报", "; ".join(problems))
+    ct_changed = tmp / "meta_ct_changed.mp4"
+    ff("-i", str(plain), "-c", "copy", *meta.ffmpeg_args(plain, 0),
+       "-metadata", "creation_time=2030-01-01T00:00:00.000000Z", str(ct_changed))
+    problems = meta.compare(ct_changed, plain)
+    check(any("creation_time" in x for x in problems), "creation_time 真被改了仍判「值变了」", "; ".join(problems))
+    mdta_ct = make_src(tmp / "src_mdta_ct.mp4", 1080, 1920, DARK,
+                       {"title": "mdta", "creation_time": "2026-08-04T12:34:56.000000Z"}, dur=1)
+    mdta_out = tmp / "meta_mdta_ct.mp4"
+    ff("-i", str(mdta_ct), "-c", "copy", *meta.ffmpeg_args(mdta_ct, 0), str(mdta_out))
+    src_ct, out_ct = mvhd_creation_time(mdta_ct), mvhd_creation_time(mdta_out)
+    check(src_ct != 0 and out_ct == src_ct and not meta.compare(mdta_out, mdta_ct),
+          "mdta 源片的 creation_time:mvhd 创建时间不被写成 0", f"源 {src_ct} 终 {out_ct}")
     try:
         meta.ffmpeg_args(src, -1)
         check(False, "ffmpeg_args 拒绝负的输入序号")

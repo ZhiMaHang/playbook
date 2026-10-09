@@ -168,7 +168,7 @@ ffprobe -v error -show_entries format=duration -show_entries stream=codec_name,s
 - 源片已有 `description` 时 `ffmpeg_args` 直接报错、不覆盖，交人处理。
 - `workflow`／`prompt` 键可能带工作流、模型文件名和提示词：按原样保留，`verify_package.py` 只报 WARN 提示，发不发由人决定。
 - 多段拼接时一个文件只留一份隐式标识：容器保留第一段源文件的元数据，全部片段的元数据写进本地 `<终版.mp4>.source-metadata.json`（不上传）。`compose.sh` 自动做这一步；逐镜头源片在本技能里拼接时，`ffmpeg_args` 和验收的 `--source` 都用第一个镜头的源文件，再跑 `python3 <playbook 仓根>/skills/digital-human-video/scripts/aigc_meta.py sidecar <终版.mp4>.source-metadata.json <镜头1.mp4> <镜头2.mp4> …`，各镜头不同时它打印 ⚠️。单条完整源片就用它本身。
-- 带 `use_metadata_tags` 后所有键都写进 mdta `keys` 盒，只认 iTunes 风格 `©nam`、`desc` 的读取器读不到标题和说明，这是已知取舍；ffprobe 两种都能读。`creation_time` 同时写在 mvhd 和 mdta 里，ffprobe 会读成「X;X」，值没变，`compare` 比对时去重。
+- 带 `use_metadata_tags` 后所有键都写进 mdta `keys` 盒，只认 iTunes 风格 `©nam`、`desc` 的读取器读不到标题和说明，这是已知取舍；ffprobe 两种都能读。`creation_time` 同时写在 mvhd 和 mdta 里，ffprobe 会读成「X;X」，值没变：`ffmpeg_args` 把去重后的值显式写回（否则 mvhd 的创建时间会被写成 0），`compare` 比对时去重。
 
 示例（路径都是占位符）：
 

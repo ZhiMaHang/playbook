@@ -52,7 +52,7 @@
     .preview-heading strong { font-weight: 500; color: var(--white); }
     .stage { width: 100%; aspect-ratio: 9 / 16; position: relative; container-type: inline-size; border: 1px solid #465062; border-radius: 22px; overflow: hidden; background: var(--bg); isolation: isolate; }
     .stage::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 25% 25%, #FFD7740B, transparent 52%); }
-    /* 尺寸与位置取自 render_text.py badge <png> 1080 1920 的 JSON（font_size 60、框 466×94、x 574、y 60、圆角 21），按 1cqw = 10.8px 换算 */
+    /* 尺寸与位置取自 render_text.py badge <png> 1080 1920 的 JSON（font_size 60、框 466×94、x 574、y 60），圆角按 badge() 的 round(0.35×字号)=21，按 1cqw = 10.8px 换算 */
     .ai-badge { position: absolute; top: 3.125%; right: 3.7037%; background: #0B1018CC; border: 1px solid #FFFFFF30; color: var(--white); font-size: 5.5556cqw; line-height: 1; padding: 1.5741cqw 3.6111cqw; border-radius: 1.9444cqw; z-index: 4; }
     .scene { position: absolute; inset: 0; }
     .motion-group { position: absolute; inset: 0; }

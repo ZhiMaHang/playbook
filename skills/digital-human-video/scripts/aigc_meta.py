@@ -32,7 +32,8 @@ INK_SAFETY_PX = 2        # 渲染时墨迹再多留 2 px,吸收编码带来的�
 # 由封装器决定、和源片无关的键:比对时排除
 MUXER_KEYS = {"major_brand", "minor_version", "compatible_brands", "encoder"}
 BRAND_KEYS = ("major_brand", "minor_version", "compatible_brands")
-# 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「X;X」读出,值本身没变,比对前去重
+# 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「X;X」读出,值本身没变,比对前去重。
+# 源片本身就是「X;X」时原样映射过去,封装器解析不了,mvhd 的创建时间会被写成 0,所以 ffmpeg_args 显式写回去重值。
 DUAL_STORED_KEYS = {"creation_time"}
 
 PRIVATE_KEYS = {"workflow", "prompt"}   # ComfyUI 原始输出自带,含工作流、模型名和提示词
@@ -74,7 +75,8 @@ def ffmpeg_args(source_path: str | Path | None, input_index: int | None) -> list
     if source_path is None:
         mapping: list[str] = []
     else:
-        clash = [k for k in format_tags(source_path) if k.lower() == "description"]
+        tags = format_tags(source_path)
+        clash = [k for k in tags if k.lower() == "description"]
         if clash:
             raise DescriptionConflict(
                 f"源片 {source_path} 已有 {clash[0]} 键,写说明字段会把它静默覆盖;请先由人决定怎么处理")
@@ -82,6 +84,10 @@ def ffmpeg_args(source_path: str | Path | None, input_index: int | None) -> list
         if index < 0:
             raise ValueError(f"源片输入序号必须 ≥ 0,收到 {index}")
         mapping = ["-map_metadata", str(index)]
+        for key in sorted(DUAL_STORED_KEYS & tags.keys()):
+            parts = set(tags[key].split(";"))
+            if len(parts) == 1 and ";" in tags[key]:
+                mapping += ["-metadata", f"{key}={parts.pop()}"]
     clear_brands = [a for k in BRAND_KEYS for a in ("-metadata", f"{k}=")]
     return mapping + clear_brands + ["-metadata", f"description={AI_DESCRIPTION}",
                                      "-movflags", "+faststart+use_metadata_tags"]
@@ -94,8 +100,13 @@ def _same_value(key: str, a: str, b: str) -> bool:
 
 
 def compare(final: str | Path, source: str | Path) -> list[str]:
-    """终版对源片的元数据核对,返回问题清单(空表示通过)。"""
+    """终版对源片的元数据核对,返回问题清单(空表示通过)。
+    传错源片(终版自己、终版副本)时比对不出任何东西,先拦下来。"""
     src, fin = format_tags(source), format_tags(final)
+    if Path(source).resolve().samefile(Path(final).resolve()):
+        return ["源片与终版是同一个文件,比对不出任何东西;--source 请传出片前的源片"]
+    if any(k.lower() == "description" for k in src):
+        return ["源片带 description 键,不像源片(源片带 description 时 ffmpeg_args 会拒绝出片);请传出片前的源片"]
     problems = []
     for key, value in src.items():
         if key in MUXER_KEYS:
