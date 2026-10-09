@@ -142,10 +142,12 @@ def dims(w: int, h: int) -> list[str]:
     return ["--expected-width", str(w), "--expected-height", str(h)]
 
 
-def expect_fail(name: str, video: Path, item: str, *extra: str) -> None:
+def expect_fail(name: str, video: Path, item: str, *extra: str, detail: str = "") -> None:
+    """非零退出,且报告里有以 [FAIL] <item>: 开头、含 detail 的一行。"""
     code, out = verify(video, *extra)
-    check(code != 0 and f"[FAIL] {item}" in out, f"verify 反例·{name}",
-          f"exit={code},点名「{item}」" if code else "竟然 exit 0")
+    hit = any(line.startswith(f"[FAIL] {item}:") and detail in line for line in out.splitlines())
+    check(code != 0 and hit, f"verify 反例·{name}",
+          f"exit={code},点名「{item}」{('含「' + detail + '」') if detail else ''}" if code else "竟然 exit 0")
 
 
 def section_badge(tmp: Path) -> dict:
@@ -247,9 +249,15 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
                         ["-map_metadata", "0", "-metadata", f"description={meta.AI_DESCRIPTION}",
                          "-movflags", "+faststart+use_metadata_tags"])
     expect_fail("brand 三键重复值", brand_dup, "源元数据保留", "--badge-spec", spec, "--source", str(src))
-    expect_fail("--source 传了终版自己", stripped, "源元数据保留", "--badge-spec", spec, "--source", str(stripped))
+    expect_fail("--source 传了终版自己", fin, "源元数据保留", "--badge-spec", spec, "--source", str(fin),
+                detail="同一个文件")
+    fin_copy = tmp / "fin_copy.mp4"
+    shutil.copyfile(fin, fin_copy)
+    expect_fail("--source 传了终版的副本", fin, "源元数据保留", "--badge-spec", spec, "--source", str(fin_copy),
+                detail="带 description")
     clash = tmp / "src_desc.mp4"
-    expect_fail("--source 带 description", fin, "源元数据保留", "--badge-spec", spec, "--source", str(clash))
+    expect_fail("--source 带 description", fin, "源元数据保留", "--badge-spec", spec, "--source", str(clash),
+                detail="带 description")
     covers = []
     for name, size in (("cover_v.png", (1080, 1440)), ("cover_b.png", (1440, 1080)), ("cover_y.png", (1080, 1920))):
         Image.new("RGB", size, (20, 20, 20)).save(tmp / name)
