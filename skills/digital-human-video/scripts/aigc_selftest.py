@@ -349,6 +349,10 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     ff("-ss", "1", "-i", str(fin), "-c", "copy", *meta.ffmpeg_args(fin, 0), str(trimmed))
     code, out = verify(trimmed, "--badge-spec", spec, "--source", str(src))
     check(code == 0, "verify 正例·头部 -c copy 剪掉 1 s(编辑表藏了预滚帧，不误判截断)", "exit 0" if code == 0 else out[-400:])
+    between = tmp / "fin_head_trimmed_between_frames.mp4"
+    ff("-ss", "1.01", "-i", str(fin), "-c", "copy", *meta.ffmpeg_args(fin, 0), str(between))
+    code, out = verify(between, "--badge-spec", spec, "--source", str(src))
+    check(code == 0, "verify 正例·头部剪在两帧之间(结尾差约 0.75 帧，在 1 帧容差内)", "exit 0" if code == 0 else out[-400:])
     both = tmp / "fin_head_tail_trimmed.mp4"
     ff("-ss", "1.02", "-i", str(fin), "-t", "1.3", "-c", "copy", *meta.ffmpeg_args(fin, 0), str(both))
     code, out = verify(both, "--badge-spec", spec, "--source", str(src))
