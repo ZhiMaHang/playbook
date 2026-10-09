@@ -71,7 +71,7 @@ class Report:
             "确认音乐和肖像等素材拥有目标平台使用权",
         ]
         if self.include_cover_manual_check:
-            manual_checks[3:3] = [
+            manual_checks[4:4] = [
                 "将三版平台封面与用户指定或当前已验收的同规格基准并排核对标题区黑底/遮罩及字体排版样式",
                 "缩略查看 B站 4:3 封面，确认左文右像、近黑标题区、金色标签、金/白两行、描边与标题安全区符合当前统一基准",
                 "缩略查看 YouTube Shorts 9:16 封面，确认标题避开右侧操作列和底部标题/频道信息区",
@@ -508,6 +508,28 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
         report.passed("AI 角标像素", f"{checked} 帧（第 0 帧、每秒一帧、末帧）都检出角标")
 
 
+def check_source_metadata(video: Path, source: Path, meta: Any, report: Report, fail: Any) -> None:
+    if not source.is_file():
+        fail("源元数据保留", f"源片不存在: {source}")
+        return
+    if source.samefile(video):
+        fail("源元数据保留", "--source 与 --video 是同一个文件，比对不出任何东西；请传出片前的源片")
+        return
+    try:
+        source_tags = meta.format_tags(source)
+        problems = meta.compare(video, source)
+    except RuntimeError as exc:
+        fail("源元数据保留", str(exc))
+        return
+    if any(key.lower() == "description" for key in source_tags):
+        fail("源元数据保留", "--source 带 description 键，不像源片（源片带 description 时 ffmpeg_args 会拒绝出片）；请传出片前的源片")
+        return
+    for problem in problems:
+        fail("源元数据保留", problem)
+    if not problems:
+        report.passed("源元数据保留", "源片非封装器键逐字保留，brand 三键无重复值")
+
+
 def check_metadata(args: argparse.Namespace, report: Report, meta: Any, strict: bool) -> None:
     fail = report.fail if strict else report.warn
     video = args.video.resolve()
@@ -523,14 +545,8 @@ def check_metadata(args: argparse.Namespace, report: Report, meta: Any, strict: 
         fail("说明字段", "终版 description 缺失或不含两要素（AI/人工智能 + 生成/合成）")
     if args.source is None:
         fail("源元数据保留未核", "缺 --source <源片.mp4>；从旧期复制的脚本过不了这一项")
-    elif not args.source.resolve().is_file():
-        fail("源元数据保留", f"源片不存在: {args.source}")
     else:
-        problems = meta.compare(video, args.source.resolve())
-        for problem in problems:
-            fail("源元数据保留", problem)
-        if not problems:
-            report.passed("源元数据保留", "源片非封装器键逐字保留，brand 三键无重复值")
+        check_source_metadata(video, args.source.resolve(), meta, report, fail)
     for flag in meta.privacy_flags(video):
         report.warn("元数据隐私提示", f"{flag}（按原样保留，只提示、不删）")
 

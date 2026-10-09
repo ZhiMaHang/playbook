@@ -7,9 +7,11 @@
   1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅,解码第 0 帧、
      1 s、2 s、末帧实测字形高;位置贴角;深浅两种底色过 verify_package 的像素判据;
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
-     description 冲突护栏;compose.sh 端到端(多段不同元数据、/bin/bash 3.2 下的冲突用例);
-  3. verify_package.py:正例 exit 0;不叠角标、旧角标、画幅不符、缺说明字段、源键丢失、
-     缺 --badge-spec、缺 --source 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN。
+     description 冲突护栏、普通(非 mdta)源片的 creation_time;compose.sh 端到端(多段不同元数据、
+     /bin/bash 3.2 下的冲突用例);
+  3. verify_package.py:正例 exit 0;不叠角标、角标只在开头/末尾掉了、淡角标、旧角标、画幅不符、
+     缺说明字段、源键丢失/被改/brand 重复值、--source 传错、缺 --badge-spec、缺 --source 都必须
+     FAIL 并点名检查项;--legacy-audit 降为 WARN。
 样本里的 AIGC 键只用假值(example-producer / test-000N),只为验证「原样保留」。
 """
 from __future__ import annotations
@@ -83,21 +85,23 @@ def tag_args(tags: dict[str, str]) -> list[str]:
 
 
 def make_src(path: Path, w: int, h: int, color: str, tags: dict[str, str] = SRC_TAGS,
-             dur: float = DURATION) -> Path:
+             dur: float = DURATION, mdta: bool = True) -> Path:
+    """mdta=False 造「普通」源片(手机、剪辑软件导出那种):标准键走 iTunes/mvhd,不带非标准键。"""
     ff("-f", "lavfi", "-i", f"color=c={color}:s={w}x{h}:d={dur}:r=25",
        "-f", "lavfi", "-i", f"sine=f=440:d={dur}",
        "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
-       *tag_args(tags), "-movflags", "+use_metadata_tags", str(path))
+       *tag_args(tags), *(["-movflags", "+use_metadata_tags"] if mdta else []), str(path))
     return path
 
 
-def overlay(src: Path, png: Path | None, x: int, y: int, out: Path, extra: list[str]) -> Path:
+def overlay(src: Path, png: Path | None, x: int, y: int, out: Path, extra: list[str],
+            enable: str | None = None) -> Path:
     if png is None:
         ff("-i", str(src), "-map", "0:v", "-map", "0:a", "-c:v", "libx264", "-crf", "18",
            "-pix_fmt", "yuv420p", "-c:a", "aac", *extra, str(out))
     else:
         ff("-i", str(src), "-loop", "1", "-i", str(png),
-           "-filter_complex", f"[0:v][1:v]overlay={x}:{y}:shortest=1[v]",
+           "-filter_complex", f"[0:v][1:v]overlay={x}:{y}:shortest=1" + (f":enable='{enable}'" if enable else "") + "[v]",
            "-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
            "-c:a", "aac", *extra, str(out))
     return out
@@ -223,6 +227,36 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     stripped = overlay(src, png, *_xy(spec), tmp / "neg_stripped.mp4",
                        STRIP_ALL + ["-metadata", f"description={meta.AI_DESCRIPTION}"])
     expect_fail("源键丢失", stripped, "源元数据保留", "--badge-spec", spec, "--source", str(src))
+    early = overlay(src, png, *_xy(spec), tmp / "neg_badge_early_only.mp4", meta.ffmpeg_args(src, 0), "lt(t,0.5)")
+    expect_fail("角标只在开头 0.5 s", early, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
+    late = overlay(src, png, *_xy(spec), tmp / "neg_badge_drops_at_end.mp4", meta.ffmpeg_args(src, 0), "lt(t,2.8)")
+    expect_fail("末尾 0.2 s 掉角标", late, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
+    faint_png = tmp / "faint_badge.png"
+    img = Image.open(png).convert("RGBA")
+    img.putalpha(img.getchannel("A").point(lambda a: 110 if a >= 200 else a))
+    img.save(faint_png)
+    faint = overlay(src, faint_png, *_xy(spec), tmp / "neg_faint_badge.mp4", meta.ffmpeg_args(src, 0))
+    expect_fail("淡角标(字 alpha 110)", faint, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
+    changed = overlay(src, png, *_xy(spec), tmp / "neg_value_changed.mp4",
+                      meta.ffmpeg_args(src, 0) + ["-metadata", "comment=changed by script"])
+    expect_fail("源键被改", changed, "源元数据保留", "--badge-spec", spec, "--source", str(src))
+    brand_dup = overlay(src, png, *_xy(spec), tmp / "neg_brand_dup.mp4",
+                        ["-map_metadata", "0", "-metadata", f"description={meta.AI_DESCRIPTION}",
+                         "-movflags", "+faststart+use_metadata_tags"])
+    expect_fail("brand 三键重复值", brand_dup, "源元数据保留", "--badge-spec", spec, "--source", str(src))
+    expect_fail("--source 传了终版自己", stripped, "源元数据保留", "--badge-spec", spec, "--source", str(stripped))
+    clash = tmp / "src_desc.mp4"
+    expect_fail("--source 带 description", fin, "源元数据保留", "--badge-spec", spec, "--source", str(clash))
+    covers = []
+    for name, size in (("cover_v.png", (1080, 1440)), ("cover_b.png", (1440, 1080)), ("cover_y.png", (1080, 1920))):
+        Image.new("RGB", size, (20, 20, 20)).save(tmp / name)
+        covers.append(str(tmp / name))
+    code, out = verify(fin, "--badge-spec", spec, "--source", str(src), "--cover-vertical", covers[0],
+                       "--cover-bilibili", covers[1], "--cover-youtube-shorts", covers[2])
+    lines = [line for line in out.splitlines() if line.startswith("- ")]
+    first = next((i for i, line in enumerate(lines) if "确认第一句实际口播" in line), -1)
+    cover = next((i for i, line in enumerate(lines) if "三版平台封面" in line), -1)
+    check(code == 0 and 0 <= first < cover, "人工清单:封面条目仍排在「第一句」条目之后", f"exit={code} 位置 {first}/{cover}")
     expect_fail("缺 --badge-spec", fin, "AI 角标未机检", "--source", str(src))
     expect_fail("缺 --source", fin, "源元数据保留未核", "--badge-spec", spec)
 
@@ -260,6 +294,21 @@ def section_metadata(tmp: Path, samples: dict) -> None:
         problems = meta.compare(out, src)
         check(not problems, f"源片在第 {index} 路·compare 无问题", "; ".join(problems))
         check(any("workflow" in f for f in meta.privacy_flags(out)), f"源片在第 {index} 路·privacy_flags 提示 workflow")
+
+    plain = make_src(tmp / "src_plain.mp4", 1080, 1920, DARK,
+                     {"title": "plain", "creation_time": "2026-08-04T12:34:56.000000Z"}, mdta=False)
+    plain_out = tmp / "meta_plain.mp4"
+    ff("-i", str(plain), "-c", "copy", *meta.ffmpeg_args(plain, 0), str(plain_out))
+    problems = meta.compare(plain_out, plain)
+    check(not problems, "普通源片的 creation_time(终版读成 X;X)compare 不误报", "; ".join(problems))
+    try:
+        meta.ffmpeg_args(src, -1)
+        check(False, "ffmpeg_args 拒绝负的输入序号")
+    except ValueError:
+        check(True, "ffmpeg_args 拒绝负的输入序号")
+    missing = subprocess.run([sys.executable, str(HERE / "aigc_meta.py"), "check", str(tmp / "nope.mp4"),
+                              "--source", str(src)], capture_output=True, text=True, check=False)
+    check(missing.returncode != 0 and "Traceback" not in missing.stderr, "CLI check 读不了文件时报 FAIL、不抛 traceback")
 
     clash = make_src(tmp / "src_desc.mp4", 1080, 1920, DARK, dict(SRC_TAGS, description="SRCDESC"), dur=1)
     try:

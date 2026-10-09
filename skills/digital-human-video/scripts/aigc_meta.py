@@ -32,6 +32,8 @@ INK_SAFETY_PX = 2        # 渲染时墨迹再多留 2 px,吸收编码带来的�
 # 由封装器决定、和源片无关的键:比对时排除
 MUXER_KEYS = {"major_brand", "minor_version", "compatible_brands", "encoder"}
 BRAND_KEYS = ("major_brand", "minor_version", "compatible_brands")
+# 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「X;X」读出,值本身没变,比对前去重
+DUAL_STORED_KEYS = {"creation_time"}
 
 PRIVATE_KEYS = {"workflow", "prompt"}   # ComfyUI 原始输出自带,含工作流、模型名和提示词
 WINDOWS_PATH_RE = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]")
@@ -76,10 +78,19 @@ def ffmpeg_args(source_path: str | Path | None, input_index: int | None) -> list
         if clash:
             raise DescriptionConflict(
                 f"源片 {source_path} 已有 {clash[0]} 键,写说明字段会把它静默覆盖;请先由人决定怎么处理")
-        mapping = ["-map_metadata", str(int(input_index))]
+        index = int(input_index)
+        if index < 0:
+            raise ValueError(f"源片输入序号必须 ≥ 0,收到 {index}")
+        mapping = ["-map_metadata", str(index)]
     clear_brands = [a for k in BRAND_KEYS for a in ("-metadata", f"{k}=")]
     return mapping + clear_brands + ["-metadata", f"description={AI_DESCRIPTION}",
                                      "-movflags", "+faststart+use_metadata_tags"]
+
+
+def _same_value(key: str, a: str, b: str) -> bool:
+    if key in DUAL_STORED_KEYS:
+        return set(a.split(";")) == set(b.split(";"))
+    return a == b
 
 
 def compare(final: str | Path, source: str | Path) -> list[str]:
@@ -91,7 +102,7 @@ def compare(final: str | Path, source: str | Path) -> list[str]:
             continue
         if key not in fin:
             problems.append(f"源片键 {key} 在终版里丢了")
-        elif fin[key] != value:
+        elif not _same_value(key, fin[key], value):
             problems.append(f"源片键 {key} 的值在终版里变了")
     if not has_two_elements(fin.get("description")):
         problems.append("终版 description 缺失或不含两要素(AI/人工智能 + 生成/合成)")
@@ -142,10 +153,14 @@ def _main(argv: list[str]) -> int:
         print("\n".join(args))
         return 0
     if len(argv) == 4 and argv[0] == "check" and argv[2] == "--source":
-        problems = compare(argv[1], argv[3])
+        try:
+            problems, flags = compare(argv[1], argv[3]), privacy_flags(argv[1])
+        except RuntimeError as exc:
+            print(f"[FAIL] {exc}")
+            return 2
         for p in problems:
             print(f"[FAIL] {p}")
-        for f in privacy_flags(argv[1]):
+        for f in flags:
             print(f"[WARN] {f}")
         if not problems:
             print("[PASS] 源元数据保留、说明字段两要素、brand 三键无重复值")

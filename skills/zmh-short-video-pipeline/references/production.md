@@ -152,7 +152,7 @@ ffprobe -v error -show_entries format=duration -show_entries stream=codec_name,s
 - 按成片**实际分辨率**调用 `render_text.badge(out, width=W, height=H)`（命令行 `render_text.py badge <out.png> <W> <H>`），叠在它写出的 `<out.png>.json` 给的 `x:y` 上，全程显示；不写死字号，也不写死 `overlay=W-w-40:60`。验收把这份 JSON 传给 `verify_package.py --badge-spec`。
 - 可复用 `digital-human-video/scripts/render_text.py` 与 `compose.sh` 的字幕、角标和画幅处理逻辑；若是单条现成 MP4，可按同样样式建立本期专用 ffmpeg 滤镜，但必须把命令或参数留在过程目录。
 - 字幕字体、字号、每行长度、安全区沿用当前仓库脚本和上一期终版这一可验证单一来源，不从记忆重写；角标文字、尺寸和位置只以 `aigc_meta.py` 与 `render_text.badge()` 为准，不沿用旧期脚本里的写法。任何改版先在台账记录。
-- 退役措辞登记（只许出现在本表，角标、字幕、文档都不许再用）：
+- 退役措辞登记（除本表和 `aigc_meta.py` 的 `RETIRED_BADGE_TEXTS` 外，角标、字幕、文档都不许再用）：
 
 | 措辞 | 状态 |
 |---|---|
@@ -167,8 +167,8 @@ ffprobe -v error -show_entries format=duration -show_entries stream=codec_name,s
 - 编码命令追加 `aigc_meta.ffmpeg_args(源片, 源片输入序号)` 返回的参数：映射源片元数据、清掉会被写成重复值的 brand 三键、写说明字段、`+faststart+use_metadata_tags`。输入序号必须显式给：不写时 ffmpeg 取第 0 路的元数据，源片不在第 0 路就整套丢光。
 - 源片已有 `description` 时 `ffmpeg_args` 直接报错、不覆盖，交人处理。
 - `workflow`／`prompt` 键可能带工作流、模型文件名和提示词：按原样保留，`verify_package.py` 只报 WARN 提示，发不发由人决定。
-- 多段拼接时一个文件只留一份隐式标识：容器保留第一段源文件的元数据，全部片段的元数据写进本地 `<终版.mp4>.source-metadata.json`（不上传）；各段不同时 `compose.sh` 打印 ⚠️。
-- 带 `use_metadata_tags` 后所有键都写进 mdta `keys` 盒，只认 iTunes 风格 `©nam`、`desc` 的读取器读不到标题和说明，这是已知取舍；ffprobe 两种都能读。
+- 多段拼接时一个文件只留一份隐式标识：容器保留第一段源文件的元数据，全部片段的元数据写进本地 `<终版.mp4>.source-metadata.json`（不上传）。`compose.sh` 自动做这一步；逐镜头源片在本技能里拼接时，`ffmpeg_args` 和验收的 `--source` 都用第一个镜头的源文件，再跑 `python3 <playbook 仓根>/skills/digital-human-video/scripts/aigc_meta.py sidecar <终版.mp4>.source-metadata.json <镜头1.mp4> <镜头2.mp4> …`，各镜头不同时它打印 ⚠️。单条完整源片就用它本身。
+- 带 `use_metadata_tags` 后所有键都写进 mdta `keys` 盒，只认 iTunes 风格 `©nam`、`desc` 的读取器读不到标题和说明，这是已知取舍；ffprobe 两种都能读。`creation_time` 同时写在 mvhd 和 mdta 里，ffprobe 会读成「X;X」，值没变，`compare` 比对时去重。
 
 示例（路径都是占位符）：
 
