@@ -35,7 +35,7 @@ MUXER_KEYS = {"major_brand", "minor_version", "compatible_brands", "encoder"}
 BRAND_KEYS = ("major_brand", "minor_version", "compatible_brands")
 # 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「mvhd 值;mdta 原串」读出。
 # 源片本身已带「;」(源片也是 use_metadata_tags 写的)时原样映射过去,封装器解析不了,mvhd 的创建时间会被写成 0,
-# 所以 ffmpeg_args 显式写回一个值:mdta 原串是带时区的绝对时间就写它(终版读回与源片逐字相同);
+# 所以 ffmpeg_args 显式写回一个值:mdta 原串是带时区的绝对时间(T 分隔,Z 或 ±hh:mm)就写它(终版读回与源片逐字相同);
 # 不是(如 ComfyUI 的 VHS 保存节点写的 now、或不带时区的本地时间)就写 mvhd 那半(已归一成 UTC),
 # 否则封装器会按出片时刻或出片机时区重新解析,创建时间就变了。
 DUAL_STORED_KEYS = {"creation_time"}
@@ -44,14 +44,18 @@ ABS_TIME_RE = re.compile(
 
 
 def _utc_second(text: str) -> datetime | None:
-    """带时区的绝对时间 → 精确到秒的 UTC 时刻;不是这种格式返回 None。"""
+    """带时区的绝对时间(T 分隔,Z 或 ±hh:mm/±hhmm)→ 精确到秒的 UTC 时刻;不是这种格式、
+    或形式对但日期不存在(闰秒 :60、2 月 30 日、+24:00 之类)都返回 None,按「不是绝对时间」处理。"""
     m = ABS_TIME_RE.fullmatch(text.strip())
     if not m:
         return None
     tz = m.group(7)
-    offset = timedelta(0) if tz == "Z" else timedelta(
-        hours=int(tz[1:3]), minutes=int(tz[-2:])) * (1 if tz[0] == "+" else -1)
-    return datetime(*(int(g) for g in m.groups()[:6]), tzinfo=timezone(offset)).astimezone(timezone.utc)
+    try:
+        offset = timedelta(0) if tz == "Z" else timedelta(
+            hours=int(tz[1:3]), minutes=int(tz[-2:])) * (1 if tz[0] == "+" else -1)
+        return datetime(*(int(g) for g in m.groups()[:6]), tzinfo=timezone(offset)).astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
 
 PRIVATE_KEYS = {"workflow", "prompt"}   # ComfyUI 原始输出自带,含工作流、模型名和提示词
 WINDOWS_PATH_RE = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]")

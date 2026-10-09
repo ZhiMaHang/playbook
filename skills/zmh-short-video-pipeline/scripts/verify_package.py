@@ -24,7 +24,8 @@ AIGC_META_PATH = Path(__file__).resolve().parents[2] / "digital-human-video/scri
 
 # 角标像素判据(合成样本正反例校准,依据见 digital-human-video/scripts/aigc_selftest.py):
 # ① 字形处亮度 ≥ 170 的像素占比 ≥ 95%(白字 alpha 220,叠上去理论亮度 ≥ 220;腐蚀后的掩码 H.264 编码后实测最低约 213,
-#    小字号退回不腐蚀的掩码时含笔画边缘,个别像素低到约 150,按占比判不受影响);
+#    小字号退回不腐蚀的掩码时含笔画边缘,个别像素低到约 150)。局限:压在逐像素黑白跳变的高频纹理上、又压得很狠
+#    (crf ≥ 28)时,占比会跌破 95% 而误判 FAIL——只往安全方向错;crf 18 时各画幅实测都在 0.99 以上;
 # ② 字形与底框的亮度中位数差 ≥ 40。只有 ① 不够:纯白画面上没有角标也能过 ①。
 GLYPH_ALPHA_MIN = 200   # 角标 PNG 里 alpha ≥ 200 的像素是字形,腐蚀 1 px 后作字形掩码
 BOX_ALPHA_MAX = 100     # 0 < alpha ≤ 100 是底框
@@ -398,8 +399,8 @@ def png_alpha(path: Path, width: int, height: int) -> bytes | None:
 
 def badge_masks(alpha: bytes, width: int, height: int) -> tuple[list[int], list[int]]:
     """字形掩码 = alpha ≥ GLYPH_ALPHA_MIN 再腐蚀 1 px（3×3 邻域全是字形才留下）；底框掩码 = 0 < alpha ≤ BOX_ALPHA_MAX。
-    字号小时腐蚀会把某几个字整个吃掉（短边 ≤ 680 一带），只剩的掩码偏在少数字上，盖住别的字也看不出；
-    所以字形横向五等分，腐蚀后任一段剩不到一成就整体退回不腐蚀的掩码。短边 720 及以上不触发。"""
+    字号小时腐蚀会把某几个字整个吃掉（STHeiti 下短边 ≤ 700 一带，换回退字体时范围略有不同），只剩的掩码偏在少数字上，
+    盖住别的字也看不出；所以字形横向五等分，腐蚀后任一段剩不到一成就整体退回不腐蚀的掩码。STHeiti 下短边 720 及以上不触发。"""
     raw = [value >= GLYPH_ALPHA_MIN for value in alpha]
     glyph = [
         y * width + x

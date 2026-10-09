@@ -4,8 +4,9 @@
 
 改 render_text.badge()、aigc_meta.py、compose.sh 的角标/元数据部分,或 verify_package.py 的
 角标/元数据检查之后,都跑这一条。覆盖:
-  1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅,另有 432x768／360x640／540x960／610x1084 小画幅,解码第 0 帧、
+  1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅解码第 0 帧、
      1 s、2 s、末帧实测字形高;位置贴角;深浅两种底色过 verify_package 的像素判据;
+     另有 432x768／360x640／540x960／610x1084 小画幅的 verify 正反例;
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏、creation_time(普通源片、mdta 源片「X;X」与「A;B」都不让 mvhd 归零、真被改仍判变)、
      封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
@@ -224,7 +225,7 @@ def section_badge(tmp: Path) -> dict:
         bare = overlay(src_s, None, 0, 0, tmp / f"neg_{w}x{h}_no_badge.mp4", meta.ffmpeg_args(src_s, 0))
         code, out = verify(bare, "--badge-spec", str(png_s) + ".json", "--source", str(src_s), *dims(w, h))
         check(code != 0 and "[FAIL] AI 角标像素:" in out, f"verify 反例·小画幅 {w}x{h} 不叠角标", f"exit={code}")
-    # 腐蚀后掩码偏在少数字上的字号(短边 ≤ 680 一带):盖住其余的字也要抓到
+    # 腐蚀后掩码偏在少数字上的字号(STHeiti 下短边 ≤ 700 一带):盖住其余的字也要抓到
     for (w, h), cover_frac, what in (((540, 960), 3, "「视频」"), ((610, 1084), 5, "左五分之一")):
         png_m = tmp / f"badge_{w}x{h}.png"
         spec_m = rt.badge(str(png_m), width=w, height=h)
@@ -562,6 +563,37 @@ def section_metadata(tmp: Path, samples: dict) -> None:
           and not meta.compare(vhs_out, vhs),
           "creation_time 原串是 now(ComfyUI VHS 保存节点默认):mvhd 不变、compare 不误报",
           f"{meta.format_tags(vhs)['creation_time']} → mvhd {mvhd_creation_time(vhs)}/{mvhd_creation_time(vhs_out)}")
+    vhs_args = meta.ffmpeg_args(vhs, 0)
+    mvhd_half = meta.format_tags(vhs)["creation_time"].split(";")[0]
+    check(f"creation_time={mvhd_half}" in vhs_args and "creation_time=now" not in vhs_args,
+          "creation_time 原串是 now 时写回的是 mvhd 那半(不是 now)", " ".join(a for a in vhs_args if "creation" in a))
+    vhs_moved = tmp / "meta_vhs_moved.mp4"
+    ff("-i", str(vhs), "-c", "copy", *vhs_args, "-metadata", "creation_time=2030-01-01T00:00:00.000000Z", str(vhs_moved))
+    check(any("creation_time" in x for x in meta.compare(vhs_moved, vhs)),
+          "creation_time 原串是 now、终版时刻真被改了仍判变")
+    for zone, raw in (("+08:00", "2026-08-04T20:34:56+08:00"), ("-05:30", "2026-08-04T07:04:56-05:30")):
+        zsrc = make_src(tmp / f"src_zone_{zone[1:3]}.mp4", 320, 240, DARK, {"creation_time": raw}, dur=1)
+        zout = tmp / f"meta_zone_{zone[1:3]}.mp4"
+        ff("-i", str(zsrc), "-c", "copy", *meta.ffmpeg_args(zsrc, 0), str(zout))
+        same = meta.format_tags(zout)["creation_time"] == meta.format_tags(zsrc)["creation_time"]
+        check(same and mvhd_creation_time(zout) == mvhd_creation_time(zsrc) and not meta.compare(zout, zsrc),
+              f"creation_time 原串带时区 {zone}:终版读回逐字相同", meta.format_tags(zout)["creation_time"])
+        rezoned = tmp / f"meta_zone_{zone[1:3]}_as_z.mp4"
+        ff("-i", str(zsrc), "-c", "copy", *meta.ffmpeg_args(zsrc, 0), "-metadata",
+           "creation_time=2026-08-04T12:34:56Z", str(rezoned))
+        check(any("creation_time" in x for x in meta.compare(rezoned, zsrc)),
+              f"creation_time 原串带时区 {zone}、终版改写成同一时刻的 Z 形式也判变(原串要逐字相同)")
+    for label, raw in (("闰秒 :60", "2016-12-31T23:59:60Z"), ("2 月 30 日", "2026-02-30T00:00:00Z")):
+        odd = make_src(tmp / f"src_odd_{len(label)}.mp4", 320, 240, DARK, {"title": "odd", "creation_time": raw}, dur=1)
+        odd_out = tmp / f"meta_odd_{len(label)}.mp4"
+        try:
+            ff("-i", str(odd), "-c", "copy", *meta.ffmpeg_args(odd, 0), str(odd_out))
+            problems = meta.compare(odd_out, odd)
+            cli = meta_cli("check", str(odd_out), "--source", str(odd))
+            check(isinstance(problems, list) and "Traceback" not in cli.stderr and cli.returncode in (0, 1),
+                  f"creation_time 是不存在的时间({label}):不崩溃", f"check exit={cli.returncode}")
+        except Exception as exc:  # noqa: BLE001
+            check(False, f"creation_time 是不存在的时间({label}):不崩溃", f"{type(exc).__name__}: {exc}")
     mkv_ct = tmp / "src_mkv_subsecond.mkv"
     ff("-f", "lavfi", "-i", f"color=c={DARK}:s=320x240:d=1:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p",
        "-metadata", "creation_time=2026-08-04T12:34:56.500000Z", str(mkv_ct))
