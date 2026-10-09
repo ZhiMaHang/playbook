@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import importlib.util
 import json
 import math
@@ -418,8 +419,9 @@ def png_ink_height(alpha: bytes, width: int) -> int:
 
 def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tuple[float, bytes]], list[float], int]:
     """只解角标区域，一遍解完：灰度帧写临时文件，showinfo 记下每帧时间戳。
-    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数）。抽样按时间戳：第 0 帧、此后每隔 ≥ 1 秒的
-    第一帧、末帧——变帧率片子里慢的段落也逐秒抽到。passthrough：不补帧丢帧，帧和时间戳一一对应。"""
+    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数）。抽样同 fps=1：第 0 帧、此后每个整秒时刻
+    正在屏上的那一帧（时间戳 ≤ 该时刻的最后一帧；变帧率里一帧停留跨过整秒也抽得到）、末帧。
+    passthrough：不补帧丢帧，帧和时间戳一一对应。"""
     size = w * h
     with tempfile.TemporaryDirectory() as tmp:
         raw, log = Path(tmp) / "badge.gray", Path(tmp) / "showinfo.log"
@@ -437,11 +439,14 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tupl
             )
         times = [float(t) for t in SHOWINFO_PTS.findall(log.read_text("utf-8", "replace"))]
         count = raw.stat().st_size // size if raw.exists() else 0
-        picks: list[int] = []
-        for index, moment in enumerate(times[:count]):
-            if not picks or moment - times[picks[-1]] >= 1 - 1e-6:
+        picks = [0] if count else []
+        second = 1
+        while count and times[0] + second <= times[count - 1]:
+            index = bisect.bisect_right(times, times[0] + second + 1e-6, 0, count) - 1
+            if index != picks[-1]:
                 picks.append(index)
-        if count and (count - 1) not in picks:
+            second += 1
+        if count and picks[-1] != count - 1:
             picks.append(count - 1)
         frames: list[tuple[float, bytes]] = []
         if picks:
@@ -564,7 +569,7 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
     if bad:
         fail("AI 角标像素", f"{len(bad)}/{checked} 帧不像有角标：" + "；".join(bad[:5]))
     else:
-        report.passed("AI 角标像素", f"{checked} 帧（第 0 帧、此后按时间戳每秒一帧、末帧）都检出角标")
+        report.passed("AI 角标像素", f"{checked} 帧（第 0 帧、此后每个整秒时刻屏上那一帧、末帧）都检出角标")
 
 
 def check_source_metadata(video: Path, source: Path, meta: Any, report: Report, fail: Any) -> None:

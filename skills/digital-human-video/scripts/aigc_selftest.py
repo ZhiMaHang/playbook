@@ -9,7 +9,7 @@
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏、creation_time(普通源片、mdta 源片「X;X」与「A;B」都不让 mvhd 归零、真被改仍判变)、
      封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、成片再混音、/bin/bash 3.2 下的冲突用例);
-     变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标要抓到;
+     变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标、一帧停留跨过整秒掉角标都要抓到;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
      几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、画幅不符、
      缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
@@ -386,6 +386,16 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
                       "not(between(t,2,4.99))")
     expect_fail("变帧率终版在慢段(每秒 1 帧的 2–5 s)掉角标", gap_fin, "AI 角标像素", "--badge-spec", str(png7) + ".json",
                 "--source", str(gap_src), *dims(w7, h7))
+    held_src = tmp / "src_vfr_held.mp4"
+    ff("-f", "lavfi", "-i", f"color=c={DARK}:s={w7}x{h7}:d=10:r=25", "-f", "lavfi", "-i", "sine=f=440:d=5",
+       "-vf", "setpts='if(lt(N,28),N/25,3+(N-28)/25)/TB'", "-frames:v", "78",
+       "-fps_mode", "passthrough", "-video_track_timescale", "600", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+       "-c:a", "aac", *tag_args(SRC_TAGS), "-movflags", "+use_metadata_tags", "-shortest", str(held_src))
+    held_fin = overlay(held_src, png7, spec7["x"], spec7["y"], tmp / "neg_vfr_held.mp4",
+                       meta.ffmpeg_args(held_src, 0) + ["-fps_mode", "passthrough", "-video_track_timescale", "600"],
+                       "not(between(t,1.07,1.09))")
+    expect_fail("变帧率终版一帧从 1.08 s 停到 3 s、只这一帧掉角标", held_fin, "AI 角标像素",
+                "--badge-spec", str(png7) + ".json", "--source", str(held_src), *dims(w7, h7))
     data = fin.read_bytes()
     for label, cut in (("只少最后 1 个字节", len(data) - 1), ("截掉后 60%", len(data) * 4 // 10),
                        ("只剩 moov", data.find(b"mdat") + 4)):
