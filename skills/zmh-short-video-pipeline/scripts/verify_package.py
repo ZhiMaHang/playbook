@@ -519,6 +519,9 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
         spec = json.loads(spec_path.read_text(encoding="utf-8"))
         x, y, w, h = (int(spec[key]) for key in ("x", "y", "w", "h"))
         canvas = [int(value) for value in spec["canvas"]]
+        png_name = spec.get("png")
+        if png_name is not None and not (isinstance(png_name, str) and png_name and Path(png_name).name == png_name):
+            raise ValueError(f"png 字段应是与几何 JSON 同目录的文件名，收到 {png_name!r}")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         fail("AI 角标几何", f"读不了 {spec_path}: {exc}")
         return
@@ -553,7 +556,7 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
         return
     report.passed("AI 角标位置", f"框 ({x},{y}) {w}x{h}，锚点 {spec.get('anchor')}")
 
-    png = spec_path.with_name(spec["png"]) if spec.get("png") else spec_path.with_suffix("")
+    png = spec_path.with_name(png_name) if png_name else spec_path.with_suffix("")
     alpha = png_alpha(png, w, h)
     if alpha is None:
         fail("AI 角标像素", f"读不了角标 PNG {png}，或尺寸不是 {w}x{h}")
@@ -604,7 +607,7 @@ def check_source_metadata(video: Path, source: Path, meta: Any, report: Report, 
     for problem in problems:
         fail("源元数据保留", problem)
     if not problems:
-        report.passed("源元数据保留", "源片非封装器键逐字保留，brand 三键无重复值")
+        report.passed("源元数据保留", "源片非封装器键逐字保留（creation_time 原串不是带时区的绝对时间时按时刻核），brand 三键无重复值")
 
 
 def check_metadata(args: argparse.Namespace, report: Report, meta: Any, strict: bool) -> None:

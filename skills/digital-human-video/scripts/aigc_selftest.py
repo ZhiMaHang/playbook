@@ -177,6 +177,12 @@ def section_badge(tmp: Path) -> dict:
     print("\n== 1. 角标 ==")
     check(meta.BADGE_TEXT not in meta.RETIRED_BADGE_TEXTS and meta.has_two_elements(meta.BADGE_TEXT),
           "措辞常量:不在退役登记里且含两要素", meta.BADGE_TEXT)
+    squeezed = [t.replace(" ", "") for t in meta.RETIRED_BADGE_TEXTS]   # 退役措辞去掉空格的写法
+    rejects = list(meta.RETIRED_BADGE_TEXTS) + squeezed + ["人工智能辅助", "画面由算法生成", "AI 打造"]
+    accepts = ["视频由 AI 生成", "内容由人工智能合成", "AI 合成", "本视频含人工智能生成合成内容（AI 生成）"]
+    wrong = [t for t in rejects if meta.has_two_elements(t)] + [t for t in accepts if not meta.has_two_elements(t)]
+    check(not wrong, "两要素判定:退役措辞(含去空格写法)与缺一要素的都不认,AI／人工智能 × 生成／合成 的组合都认",
+          "判错: " + "、".join(wrong))
     old_cli = subprocess.run([sys.executable, str(HERE / "render_text.py"), "badge", str(tmp / "x.png")],
                              capture_output=True, text=True, check=False)
     check(old_cli.returncode != 0 and "<W> <H>" in old_cli.stderr, "旧 CLI 用法(不带宽高)报错并提示新用法")
@@ -355,6 +361,16 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
                         "-metadata", "compatible_brands=", "-metadata", "description=本视频由 AI 辅助完成",
                         "-movflags", "+faststart+use_metadata_tags"])
     expect_fail("说明字段只有 AI 没有生成", one_elem, "说明字段", "--badge-spec", spec, "--source", str(src))
+    retired_desc = overlay(src, png, *_xy(spec), tmp / "neg_desc_retired.mp4",
+                           ["-map_metadata", "0", "-metadata", "major_brand=", "-metadata", "minor_version=",
+                            "-metadata", "compatible_brands=", "-metadata", f"description={meta.RETIRED_BADGE_TEXTS[0]}",
+                            "-movflags", "+faststart+use_metadata_tags"])
+    expect_fail("说明字段用了退役措辞", retired_desc, "说明字段", "--badge-spec", spec, "--source", str(src))
+    for n, bad_png in enumerate(("sub/badge.png", 123)):
+        odd_spec = tmp / f"spec_badpng_{n}.png.json"
+        odd_spec.write_text(json.dumps(dict(base_spec, png=bad_png), ensure_ascii=False), encoding="utf-8")
+        expect_fail(f"几何 JSON 的 png 字段不是文件名({bad_png!r})", fin, "AI 角标几何", "--badge-spec", str(odd_spec),
+                    "--source", str(src))
     cli = meta_cli("check", str(one_elem), "--source", str(src))
     check(cli.returncode == 1 and "description" in cli.stdout, "CLI check·说明字段缺一要素", f"exit={cli.returncode}")
     tex = tmp / "src_texture.mp4"
@@ -697,6 +713,7 @@ def section_compose(tmp: Path) -> None:
     data = json.loads(side.read_text(encoding="utf-8")) if side.is_file() else {"segments": []}
     ids = [json.loads(s["tags"].get("AIGC", "{}")).get("ProduceID") for s in data["segments"]]
     check(ids == ["test-0001", "test-0002"], "sidecar 记下两段的 AIGC", json.dumps(ids))
+    check(data.get("kept_in_container") == "dh1.mp4", "sidecar 记下容器里留的是第一段", str(data.get("kept_in_container")))
     duration = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
                                      str(out)], capture_output=True, text=True, check=True).stdout)
     check(abs(duration - sum(seg_dur.values())) <= 0.1, "compose 成片时长 ≈ 各段之和(±0.1 s)",
