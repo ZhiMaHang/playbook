@@ -23,7 +23,7 @@ from typing import Any
 AIGC_META_PATH = Path(__file__).resolve().parents[2] / "digital-human-video/scripts/aigc_meta.py"
 
 # 角标像素判据(合成样本正反例校准,依据见 digital-human-video/scripts/aigc_selftest.py):
-# ① 字形处亮度 ≥ 170 的像素占比 ≥ 95%(白字 alpha 220,压在任何底色上亮度都 ≥ 220);
+# ① 字形处亮度 ≥ 170 的像素占比 ≥ 95%(白字 alpha 220,叠上去理论亮度 ≥ 220,H.264 编码后实测最低约 213);
 # ② 字形与底框的亮度中位数差 ≥ 40。只有 ① 不够:纯白画面上没有角标也能过 ①。
 GLYPH_ALPHA_MIN = 200   # 角标 PNG 里 alpha ≥ 200 的像素是字形,腐蚀 1 px 后作字形掩码
 BOX_ALPHA_MAX = 100     # 0 < alpha ≤ 100 是底框
@@ -420,8 +420,8 @@ def png_ink_height(alpha: bytes, width: int) -> int:
 
 def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tuple[float, bytes]], list[float], int]:
     """只解角标区域，一遍解完：灰度帧写临时文件，showinfo 记下每帧时间戳。
-    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数）。抽样：第 0 帧、此后每个整秒时刻
-    正在屏上的那一帧（时间戳 ≤ 该时刻的最后一帧，相当于 fps=1:round=up；变帧率里一帧停留跨过整秒也抽得到）、末帧。
+    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数）。抽样：第 0 帧、以它的时间为起点此后每个整秒时刻
+    正在屏上的那一帧（时间戳 ≤ 该时刻的最后一帧；起点为 0 时相当于 fps=1:round=up；变帧率里一帧停留跨过整秒也抽得到）、末帧。
     passthrough：不补帧丢帧，帧和时间戳一一对应。"""
     size = w * h
     with tempfile.TemporaryDirectory() as tmp:
@@ -465,7 +465,8 @@ BMFF_FIRST_BOXES = {b"ftyp", b"styp", b"moov", b"mdat", b"free", b"skip", b"wide
 
 def container_problem(path: Path) -> tuple[bool, str | None]:
     """逐个走 MP4/MOV 的顶层 box：哪个 box 声明的长度超出文件，就是被截断（字节级，与帧时间无关）。
-    返回（能否核，问题）：不是 MP4/MOV 盒结构时返回 (False, None)；结构完整时返回 (True, None)。"""
+    返回（能否核，问题）：不是 MP4/MOV 盒结构、或某个 box 长度写 0（到文件尾，声明不了长度）时返回 (False, None)；
+    结构完整时返回 (True, None)。"""
     size = path.stat().st_size
     with path.open("rb") as fh:
         offset = 0

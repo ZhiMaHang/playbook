@@ -13,7 +13,7 @@
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
      几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧;
      mdat 长度未声明时只报 WARN、ffmpeg 彩色日志照常解析、画幅不符、
-     缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
+     插入面板盖住部分角标、白闪盖过角标、缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
      脱离插件目录找不到 aigc_meta.py 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN;
      aigc_meta.py check 命令行同样拦得住传错的 --source 和缺说明字段。
 样本里的 AIGC 键只用假值(example-producer / test-000N),只为验证「原样保留」。
@@ -194,6 +194,7 @@ def section_badge(tmp: Path) -> dict:
         on_disk = json.loads(Path(str(png) + ".json").read_text(encoding="utf-8"))
         check(on_disk == spec and spec["canvas"] == [w, h], f"{w}x{h} 写出几何 JSON")
         check(spec["font_size"] >= need, f"{w}x{h} 字号 ≥ {need}", str(spec["font_size"]))
+        check(spec["ink_height_px"] >= need + 2, f"{w}x{h} 墨迹高 ≥ 下限＋2(给编码留余量)", str(spec["ink_height_px"]))
         check(spec["x"] >= 0 and spec["y"] >= 0 and spec["x"] + spec["w"] <= w and spec["y"] + spec["h"] <= h
               and w - spec["x"] - spec["w"] == mx and spec["y"] == my,
               f"{w}x{h} 框在画面内且贴右上角(边距 {mx},{my})",
@@ -338,7 +339,7 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     check(code == 0, "verify 正例·有纹理的底片", "exit 0" if code == 0 else out[-400:])
     tdata, total = tex_fin.read_bytes(), decoded_frames(tex_fin)
     cut2 = tmp / "neg_truncated_2frames.mp4"
-    lo, hi = len(tdata) // 2, len(tdata)   # 二分出「恰好少 2 帧」的最短截断:钉住 1 帧容差本身
+    lo, hi = len(tdata) // 2, len(tdata)   # 二分出「恰好少 2 帧」的截断样本:B 帧终版少几帧也得判截断
     while lo < hi:
         mid = (lo + hi) // 2
         cut2.write_bytes(tdata[:mid])
@@ -423,6 +424,32 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     code, out = verify(open_fin, "--badge-spec", spec, "--source", str(src))
     check(code == 0 and "[WARN] AI 角标像素" in out and "无从核对" in out,
           "mdat 长度写 0(到文件尾)时报「截断无从核对」WARN，不冒充核过", f"exit={code}")
+    bx, by = _xy(spec)
+    bw, bh = json.loads(Path(spec).read_text(encoding="utf-8"))["w"], json.loads(Path(spec).read_text(encoding="utf-8"))["h"]
+    cover_x = bx + bw * 4 // 5
+    for label, extra_filter, needle in (
+        ("插入面板盖住角标右边五分之一(「成」字)", f"drawbox=x={cover_x}:y={by}:w={bx + bw - cover_x}:h={bh}:color=black:t=fill:enable='between(t,1,2.5)'", "亮字占比"),
+        ("白闪 85% 盖过角标", "drawbox=x=0:y=0:w=iw:h=ih:color=white@0.85:t=fill:enable='between(t,0.9,1.1)'", "字形−底框"),
+    ):
+        partial = tmp / f"neg_partial_{len(extra_filter)}.mp4"
+        ff("-i", str(src), "-loop", "1", "-i", str(png),
+           "-filter_complex", f"[0:v][1:v]overlay={bx}:{by}:shortest=1,{extra_filter}[v]",
+           "-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
+           *meta.ffmpeg_args(src, 0), str(partial))
+        expect_fail(label, partial, "AI 角标像素", "--badge-spec", spec, "--source", str(src), detail=needle)
+    dual = tmp / "src_dual_brand.mp4"
+    ff("-i", str(src), "-c", "copy", "-map_metadata", "0", "-movflags", "+use_metadata_tags", str(dual))
+    dual_bytes = dual.read_bytes()
+    stamp = meta.format_tags(dual).get("encoder", "").encode()
+    older = dual_bytes.replace(stamp, (b"Lavf59.27.10" + b"0" * len(stamp))[:len(stamp)]) if stamp else dual_bytes
+    dual.write_bytes(older)
+    dual_fin = overlay(dual, png, bx, by, tmp / "fin_dual_brand.mp4", meta.ffmpeg_args(dual, 0))
+    dtags = meta.format_tags(dual)
+    code, out = verify(dual_fin, "--badge-spec", spec, "--source", str(dual))
+    check(";" in dtags.get("minor_version", "") and dtags.get("encoder") != meta.format_tags(dual_fin).get("encoder")
+          and code == 0 and not meta.compare(dual_fin, dual),
+          "verify 正例·源片 brand 重复值、encoder 是旧版本(即梦段那种)不误报",
+          f"源 encoder={dtags.get('encoder')} minor={dtags.get('minor_version')} exit={code}")
     covers = []
     for name, size in (("cover_v.png", (1080, 1440)), ("cover_b.png", (1440, 1080)), ("cover_y.png", (1080, 1920))):
         Image.new("RGB", size, (20, 20, 20)).save(tmp / name)
