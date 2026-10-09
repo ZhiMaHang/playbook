@@ -7,7 +7,7 @@
   1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅解码第 0 帧、
      1 s、2 s、末帧实测字形高、字高下限正好 5%、1080x1920 几何不漂;位置贴角;深浅两种底色过
      verify_package 的像素判据;另有 432x768／360x640／540x960／610x1084 小画幅的 verify 正反例;
-  2. 元数据:源片键逐字保留(含非标准键)、说明字段、两要素判定、brand 三键无重复值、源片在第 0/1 路、
+  2. 元数据:源片键逐字保留(含非标准键)、说明字段、两要素判定、隐私提示(workflow／prompt／本机路径,不误报网址)、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏(含 Matroska 大写键名)、creation_time(普通源片、mdta 源片「X;X」与「A;B」
      都不让 mvhd 归零、原串是 now、带时区原串逐字保留、不存在的时间不崩溃、MKV 小数秒、真被改仍判变)、
      封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、首段是 clip、
@@ -86,6 +86,7 @@ SRC_TAGS = {
     "title": "selftest title", "artist": "selftest artist", "comment": "selftest comment",
     "AIGC": aigc_value("test-0001"),
     "workflow": json.dumps({"nodes": [{"id": i, "type": "ExampleNode"} for i in range(60)]}),
+    "prompt": json.dumps({"1": {"class_type": "ExampleNode", "inputs": {"text": "example"}}}),
 }
 
 
@@ -226,6 +227,10 @@ def section_badge(tmp: Path) -> dict:
             code, out = verify(fin, "--badge-spec", str(png) + ".json", "--source", str(src), *dims(w, h))
             check(code == 0 and "[WARN] AI 角标像素" not in out, f"verify 正例·{w}x{h} 底色 {bg}(且角标像素无 WARN)",
                   "exit 0" if code == 0 else out[-600:])
+            if (w, h, bg) == (1080, 1920, DARK):
+                privacy = [line for line in out.splitlines() if line.startswith("[WARN] 元数据隐私提示:")]
+                check(any("workflow" in line for line in privacy) and any("prompt" in line for line in privacy),
+                      "verify 对源片带来的 workflow／prompt 键报隐私提示 WARN", f"{len(privacy)} 行")
     try:
         rt.badge(str(tmp / "bad_anchor.png"), width=1080, height=1920, anchor="TR")
         check(False, "anchor 只认小写 tr/tl/br/bl")
@@ -363,6 +368,11 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
         bad_spec = tmp / f"spec_bad_{n}.png.json"
         bad_spec.write_text(json.dumps(dict(base_spec, **change), ensure_ascii=False), encoding="utf-8")
         expect_fail(label, fin, item, "--badge-spec", str(bad_spec), "--source", str(src), detail=needle)
+    other_text = tmp / "spec_other_text.png.json"
+    other_text.write_text(json.dumps(dict(base_spec, text="视频含 AI 合成画面"), ensure_ascii=False), encoding="utf-8")
+    code, out = verify(fin, "--badge-spec", str(other_text), "--source", str(src))
+    check(code == 0 and "[PASS] AI 角标措辞:" in out and "与措辞常量" in out,
+          "角标措辞含两要素但不是措辞常量:PASS 并 WARN 提示", f"exit={code}")
     _, old_fin, old_png = samples["old"]
     ow, oh = Image.open(old_png).size
     liar = tmp / "liar_old_badge.png.json"
@@ -542,7 +552,7 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     legacy = overlay(src, None, 0, 0, tmp / "legacy.mp4", STRIP_ALL)
     expect_fail("旧片不带 --legacy-audit", legacy, "AI 角标未机检")
     code, out = verify(legacy, "--legacy-audit")
-    check(code == 0 and "[WARN] AI 角标未机检" in out and "[WARN] 说明字段" in out
+    check(code == 0 and "[WARN] AI 角标未机检" in out and "[WARN] 说明字段" in out and "[WARN] legacy-audit:" in out
           and "[WARN] 源元数据保留未核" in out and "[FAIL]" not in out,
           "旧片带 --legacy-audit:新增项降为 WARN、exit 0", f"exit={code}")
     code, out = verify(legacy, "--legacy-audit", "--source", str(src))
@@ -576,6 +586,11 @@ def section_metadata(tmp: Path, samples: dict) -> None:
         problems = meta.compare(out, src)
         check(not problems, f"源片在第 {index} 路·compare 无问题", "; ".join(problems))
         check(any("workflow" in f for f in meta.privacy_flags(out)), f"源片在第 {index} 路·privacy_flags 提示 workflow")
+        if index == 0:
+            cli = meta_cli("check", str(out), "--source", str(src))
+            warns = [line for line in cli.stdout.splitlines() if line.startswith("[WARN]")]
+            check(cli.returncode == 0 and any("workflow" in w for w in warns) and any("prompt" in w for w in warns),
+                  "CLI check 对 workflow／prompt 键打印 [WARN]", f"exit={cli.returncode}")
 
     plain = make_src(tmp / "src_plain.mp4", 1080, 1920, DARK,
                      {"title": "plain", "creation_time": "2026-08-04T12:34:56.000000Z"}, mdta=False)
@@ -668,6 +683,11 @@ def section_metadata(tmp: Path, samples: dict) -> None:
     check(not meta.write_sidecar(tmp / "mixed.json", [mkv, plain_mp4]), "sidecar:MKV 与 MP4 源片只差封装器键时不报「各段不同」")
     win = make_src(tmp / "src_winpath.mp4", 320, 240, DARK, {"comment": "D:\\ComfyUI\\output\\clip.mp4"}, dur=1)
     check(any("Windows" in f for f in meta.privacy_flags(win)), "privacy_flags 提示 Windows 盘符路径")
+    mac = make_src(tmp / "src_macpath.mp4", 320, 240, DARK, {"comment": "/Users/example/ComfyUI/output/clip.mp4"}, dur=1)
+    check(any("/Users/" in f for f in meta.privacy_flags(mac)), "privacy_flags 提示本机 /Users/ 路径(示例为虚构路径)")
+    url = make_src(tmp / "src_url.mp4", 320, 240, DARK, {"comment": "see https://example.com/workflow"}, dur=1)
+    check(not meta.privacy_flags(url), "privacy_flags 不把 https:// 网址误当 Windows 盘符路径",
+          "; ".join(meta.privacy_flags(url)))
     side = meta_cli("sidecar", str(tmp / "side.json"), str(tmp / "nope.mp4"))
     check(side.returncode == 2 and "Traceback" not in side.stderr, "CLI sidecar 读不了文件时退出码 2、不抛 traceback")
     cli = meta_cli("check", str(mdta_out), "--source", f"file:{mdta_ct}")

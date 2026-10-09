@@ -10,7 +10,7 @@
 用法:
   aigc_meta.py args <源片.mp4> <源片输入序号>    # 每行一个 ffmpeg 参数;源片已有别的 description(不是我方说明字段)时退出码 2
   aigc_meta.py args --no-source                  # 没有源片(全是图卡)时:只写说明字段并清理 brand 三键
-  aigc_meta.py check <终版.mp4> --source <源片.mp4>   # 有问题时退出码 1;隐私提示只打印、不删
+  aigc_meta.py check <终版.mp4> --source <源片.mp4>   # 有问题时退出码 1、读不了文件时 2;隐私提示只打印、不删
   aigc_meta.py sidecar <out.json> <源片1> [源片2 ...]  # 多段源片元数据全量落本地;各段不同时打印 ⚠️
 """
 from __future__ import annotations
