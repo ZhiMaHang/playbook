@@ -21,7 +21,12 @@
     "height": 1300
   },
   "subtitle_style": "inherit_current_verified_render_text_strip",
-  "ai_badge_style": "inherit_current_verified_full_duration_badge",
+  "ai_badge_style": "gb45438_selfbaseline_full_duration_badge",
+  "ai_badge": {
+    "text_source": "aigc_meta.BADGE_TEXT",
+    "min_glyph_ratio_of_shortest_side": 0.05,
+    "anchor": "tr"
+  },
   "image_generation": {
     "requested_model": "Image 2.5",
     "actual_model": null,

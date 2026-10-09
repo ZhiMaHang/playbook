@@ -353,7 +353,7 @@ scripts/compose.sh work/<项目名> work/<项目名>/成品.mp4
 ### ④ 交付与归档
 
 - 给用户成片路径 + 实际总成本(按各段产出秒数合计)+ 生成耗时;
-- 显式「视频由 AI 制作」角标已由 compose.sh 烧录,jimeng_dh.py 输出 aigc_meta_tagged=true 才算隐式标识成功——两者缺一在交付时明示;
+- 显式 AI 角标(措辞取 `scripts/aigc_meta.py` 的 BADGE_TEXT,现为「视频由 AI 生成」)已由 compose.sh 按成片分辨率烧录(字高≥最短边 5%、全程);jimeng_dh.py 输出 aigc_meta_tagged=true 只说明**数字人段**带上了服务商写入的隐式标识,成片里还在不在,要靠 compose.sh 保留源元数据——交付前跑 `python3 scripts/aigc_meta.py check <成品.mp4> --source <第一个 dh/clip 段的源 mp4>` 核(多段时其余段的标识记在 `<成品.mp4>.source-metadata.json`,本地留存)。任一项不过在交付时明示;
 - 运营用途的片子:成片信息按所在工作区的归档约定记档(有台账则记入当期档);提醒发布时在平台侧勾选 AI 生成声明;**发布一律人工**,不在本技能内。
 
 ## 背景音乐(可选,但只能用自己合成的)

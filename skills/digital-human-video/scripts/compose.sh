@@ -1,6 +1,8 @@
 #!/bin/bash
 # 竖版成片合成(纯 overlay,不依赖 drawtext——本机 ffmpeg 无该滤镜):
-# 数字人段/图卡段 → 1080x1920 拼接 + PIL 字幕条 + 「视频由 AI 制作」角标(合规必带,不许去掉)
+# 数字人段/图卡段 → 1080x1920 拼接 + PIL 字幕条 + 显式 AI 角标(措辞见 aigc_meta.BADGE_TEXT;必带,不许去掉)
+# 成片保留第一个 dh/clip 段源文件的元数据(含服务商写入的 AIGC 隐式标识),另写一条 description 说明。
+# 清空源元数据的参数不许用,见 zmh-short-video-pipeline/references/production.md「成片元数据」一节。
 # 用法: compose.sh <workdir> <out.mp4>
 # 注意: segments.txt 里的路径一律**相对 workdir**(脚本自己拼 $WORK/),写绝对路径会拼成两截。
 # 约定:<workdir>/segments.txt 每行一个片段:
@@ -17,7 +19,23 @@ set -euo pipefail
 [ -f ~/.config/zmh-dhv/env ] && { set -a; . ~/.config/zmh-dhv/env; set +a; }
 WORK="$1"; OUT="$2"; TMP="$WORK/_tmp"; mkdir -p "$TMP"
 DIR="$(cd "$(dirname "$0")" && pwd)"
-python3 "$DIR/render_text.py" badge "$TMP/badge.png"
+BADGE_JSON=$(python3 "$DIR/render_text.py" badge "$TMP/badge.png" 1080 1920)
+BXY=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["x"], d["y"])' <<< "$BADGE_JSON")
+BX=${BXY% *}; BY=${BXY#* }
+# 元数据来源 = 第一个 dh/clip 段的原始源文件(一个文件只留一份隐式标识;各段不同时其余记进本地 sidecar)。
+# 护栏放在编码之前:源片已有 description 时 aigc_meta.py 非零退出,赋值式命令替换让 set -e 当场停下。
+# ⚠️ 不要改成 `done < <(python3 …)`:进程替换的失败不触发 set -e,护栏会被吞掉;bash 3.2 也没有 mapfile。
+SRCS=()
+while read -r kind a _; do
+  case "${kind:-}" in dh|clip) SRCS+=("$WORK/$a") ;; esac
+done < "$WORK/segments.txt"
+if [ ${#SRCS[@]} -gt 0 ]; then
+  META_TXT=$(python3 "$DIR/aigc_meta.py" args "${SRCS[0]}" 1)
+  python3 "$DIR/aigc_meta.py" sidecar "$OUT.source-metadata.json" "${SRCS[@]}"
+else
+  META_TXT=$(python3 "$DIR/aigc_meta.py" args --no-source)
+fi
+META=(); while IFS= read -r l; do META+=("$l"); done <<< "$META_TXT"
 i=0; LIST="$TMP/concat.txt"; : > "$LIST"
 while read -r kind a b c; do
   [ -z "${kind:-}" ] && continue
@@ -35,8 +53,9 @@ while read -r kind a b c; do
       VF="[0:v]scale=1080:-2,pad=1080:1920:0:200:color=0x101828[bg]"                      # 小画幅:置于上部,下留字幕区
     fi
     ffmpeg -nostdin -y -loglevel error -i "$WORK/$a" -i "$TMP/sub_$i.png" -i "$TMP/badge.png" ${EXTRA[@]+"${EXTRA[@]}"} \
-      -filter_complex "$VF;[bg][1:v]overlay=0:H-h-140[s];[s][2:v]overlay=W-w-40:60[v]" \
-      -map "[v]" "${AUD[@]}" -r 25 -c:v libx264 -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 "$SEG"
+      -filter_complex "$VF;[bg][1:v]overlay=0:H-h-140[s];[s][2:v]overlay=${BX}:${BY}[v]" \
+      -map "[v]" "${AUD[@]}" -r 25 -c:v libx264 -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 \
+      -map_metadata 0 -movflags +use_metadata_tags "$SEG"
   elif [ "$kind" = "clip" ]; then
     # 生成视频铺满整幅 + 外挂旁白。时长以旁白为准,视频多余部分裁掉。
     DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$WORK/$b")
@@ -45,16 +64,22 @@ while read -r kind a b c; do
     awk -v v="$VDUR" -v d="$DUR" 'BEGIN{if (v+0.05 < d+0) exit 1}' \
       || echo "  ⚠️ 片段 $i:视频 ${VDUR}s 短于旁白 ${DUR}s,尾部会定格,建议换更长的视频段"
     ffmpeg -nostdin -y -loglevel error -i "$WORK/$a" -i "$WORK/$b" -i "$TMP/sub_$i.png" -i "$TMP/badge.png" \
-      -filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg];[bg][2:v]overlay=0:H-h-140[s];[s][3:v]overlay=W-w-40:60[v]" \
-      -map "[v]" -map 1:a -t "$DUR" -r 25 -c:v libx264 -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 "$SEG"
+      -filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg];[bg][2:v]overlay=0:H-h-140[s];[s][3:v]overlay=${BX}:${BY}[v]" \
+      -map "[v]" -map 1:a -t "$DUR" -r 25 -c:v libx264 -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 \
+      -map_metadata 0 -movflags +use_metadata_tags "$SEG"
   else
     # 静态图卡 + 配音,时长=音频(用 -t 精确收口;-loop 1 -shortest 会溢出数秒)
     DUR=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$WORK/$b")
     ffmpeg -nostdin -y -loglevel error -loop 1 -i "$WORK/$a" -i "$WORK/$b" -i "$TMP/sub_$i.png" -i "$TMP/badge.png" \
-      -filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=0x101828[bg];[bg][2:v]overlay=0:H-h-140[s];[s][3:v]overlay=W-w-40:60[v]" \
+      -filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=0x101828[bg];[bg][2:v]overlay=0:H-h-140[s];[s][3:v]overlay=${BX}:${BY}[v]" \
       -map "[v]" -map 1:a -t "$DUR" -r 25 -c:v libx264 -pix_fmt yuv420p -c:a aac -ar 44100 -ac 2 "$SEG"
   fi
   echo "file 'norm_$i.mp4'" >> "$LIST"
 done < "$WORK/segments.txt"
-ffmpeg -nostdin -y -loglevel error -f concat -safe 0 -i "$LIST" -c copy "$OUT"
+# concat -c copy 默认不带任何全局元数据:另把源文件作第 1 路输入,只取它的元数据(-map 0 只要拼接流)
+if [ ${#SRCS[@]} -gt 0 ]; then
+  ffmpeg -nostdin -y -loglevel error -f concat -safe 0 -i "$LIST" -i "${SRCS[0]}" -map 0 -c copy ${META[@]+"${META[@]}"} "$OUT"
+else
+  ffmpeg -nostdin -y -loglevel error -f concat -safe 0 -i "$LIST" -map 0 -c copy ${META[@]+"${META[@]}"} "$OUT"
+fi
 echo "成片 → $OUT ($(ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT")s)"

@@ -3,8 +3,10 @@
 用法:
   render_text.py card  <out.png> <标题> <正文行1|行2|行3> [脚注]   # 1080x1920 数据图卡
   render_text.py strip <out.png> <字幕文本>                        # 透明底字幕条(自动换行)
-  render_text.py badge <out.png>                                   # 「视频由 AI 制作」角标(合规必带)
+  render_text.py badge <out.png> <W> <H> [tr|tl|br|bl]             # 显式 AI 角标(必带;按成片实际分辨率算字高,stdout 打印几何 JSON)
 """
+import json
+import os
 import sys
 from PIL import Image, ImageDraw, ImageFont
 
@@ -123,19 +125,112 @@ def strip(out, text):
         center(d, pad + i * lh, line, f, (255, 255, 255, 255))
     img.save(out)
 
-def badge(out):
-    f = font(34)
-    tmp = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    w = int(tmp.textlength("视频由 AI 制作", font=f))
-    img = Image.new("RGBA", (w + 44, 60), (0, 0, 0, 0))
+# ── 显式 AI 角标 ────────────────────────────────────────────────────
+# 措辞(BADGE_TEXT)与字高下限的唯一真源在同目录 aigc_meta.py。各期脚本用
+# spec_from_file_location 加载本文件,这时本目录不在 sys.path 上,`import aigc_meta`
+# 会抛 ModuleNotFoundError,所以按路径加载;放到 badge() 里懒加载,strip/card 不受牵连。
+BADGE_ANCHORS = ("tr", "tl", "br", "bl")
+BADGE_MARGIN_X, BADGE_MARGIN_Y = 0.037, 0.056   # 边距占最短边的比例:1080 时正好是 40、60
+_AIGC_META = None
+
+
+def _aigc_meta():
+    global _AIGC_META
+    if _AIGC_META is None:
+        import importlib.util
+        from pathlib import Path
+        path = Path(__file__).resolve().with_name("aigc_meta.py")
+        spec = importlib.util.spec_from_file_location("aigc_meta", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _AIGC_META = module
+    return _AIGC_META
+
+
+def _font_and_path(size):
+    for p in FONTS:
+        try: return ImageFont.truetype(p, size), p
+        except OSError: continue
+    sys.exit("无可用中文字体")
+
+
+def _ink_height(text, f):
+    """整行墨迹高:L 模式白字,阈值 >128 的外接框高度。实测而非「字号×系数」,换回退字体也成立。"""
+    l, t, r, b = f.getbbox(text)
+    img = Image.new("L", (r - l + 8, b - t + 8), 0)
+    ImageDraw.Draw(img).text((4 - l, 4 - t), text, font=f, fill=255)
+    bb = img.point(lambda v: 255 if v > 128 else 0).getbbox()
+    return bb[3] - bb[1] if bb else 0
+
+
+def _even(v):
+    """yuv420 叠加按 2 像素对齐:边距、框宽高取偶数,贴边的角才落在偶数坐标上不被挪位。"""
+    return 2 * round(v / 2)
+
+
+def badge(out, *, width, height, anchor="tr"):
+    """按成片实际分辨率出显式 AI 角标 PNG,并写出 <out>.json 几何说明(同时作为返回值)。
+    width/height 必填、没有默认值:分辨率一变,按 1080x1920 悄悄兜底就是错的尺寸。
+    字号从 ceil(5%·最短边) 起逐 1 增大,直到整行墨迹高 ≥ 下限 + 2 px;
+    超出画面就报错,不静默裁切。"""
+    m = _aigc_meta()
+    if anchor not in BADGE_ANCHORS:
+        raise ValueError(f"anchor 只能是 {'/'.join(BADGE_ANCHORS)},收到 {anchor!r}")
+    W, H = int(width), int(height)
+    if W <= 0 or H <= 0:
+        raise ValueError(f"画幅必须为正: {W}x{H}")
+    S = min(W, H)
+    need = m.min_glyph_px(W, H)
+    size = need
+    f, fpath = _font_and_path(size)
+    ink = _ink_height(m.BADGE_TEXT, f)
+    while ink < need + m.INK_SAFETY_PX:
+        size += 1
+        if size > 4 * need:
+            raise ValueError(f"字体 {fpath} 量不出合格墨迹高(字号已到 {size})")
+        f, fpath = _font_and_path(size)
+        ink = _ink_height(m.BADGE_TEXT, f)
+    # 样式沿用旧角标:圆角黑底 alpha 95、白字 alpha 220;内边距和圆角按字号比例缩放
+    pad_x, pad_y = round(0.65 * size), round(0.3 * size)
+    l, t, r, b = f.getbbox(m.BADGE_TEXT)
+    w, h = r - l + 2 * pad_x, b - t + 2 * pad_y
+    w, h = w + w % 2, h + h % 2   # 宽高补成偶数(理由见 _even)
+    mx, my = _even(BADGE_MARGIN_X * S), _even(BADGE_MARGIN_Y * S)
+    if w + 2 * mx > W or h + 2 * my > H:
+        raise ValueError(f"角标 {w}x{h}(含边距 {mx},{my})超出画面 {W}x{H}")
+    x = mx if anchor[1] == "l" else W - w - mx
+    y = my if anchor[0] == "t" else H - h - my
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([0, 0, w + 43, 59], radius=12, fill=(0, 0, 0, 95))
-    d.text((22, 9), "视频由 AI 制作", font=f, fill=(255, 255, 255, 220))
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=round(0.35 * size), fill=(0, 0, 0, 95))
+    d.text(((w - (r - l)) // 2 - l, (h - (b - t)) // 2 - t), m.BADGE_TEXT, font=f, fill=(255, 255, 255, 220))
     img.save(out)
+    spec = {
+        "text": m.BADGE_TEXT, "font_path": fpath, "font_size": size,
+        "ink_height_px": ink, "min_required_px": need, "shortest_side": S,
+        "canvas": [W, H], "x": x, "y": y, "w": w, "h": h, "anchor": anchor,
+        "margin": [mx, my], "png": os.path.basename(str(out)),
+        "rule": "GB 45438-2025 图解数值自设基线：两要素＋字高≥最短边 5%",
+    }
+    with open(str(out) + ".json", "w", encoding="utf-8") as fh:
+        json.dump(spec, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    return spec
+
+
+BADGE_USAGE = "用法: render_text.py badge <out.png> <W> <H> [tr|tl|br|bl]   (宽高必填,按成片实际分辨率)"
+
 
 if __name__ == "__main__":
     mode = sys.argv[1]
     if mode == "card":  card(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5] if len(sys.argv) > 5 else "单一商户题集实测 · 不代表行业均值")
     elif mode == "strip": strip(sys.argv[2], sys.argv[3])
-    elif mode == "badge": badge(sys.argv[2])
+    elif mode == "badge":
+        if len(sys.argv) not in (5, 6): sys.exit(BADGE_USAGE)
+        try:
+            spec = badge(sys.argv[2], width=int(sys.argv[3]), height=int(sys.argv[4]),
+                         anchor=sys.argv[5] if len(sys.argv) > 5 else "tr")
+        except ValueError as e:
+            sys.exit(f"{e}\n{BADGE_USAGE}")
+        print(json.dumps(spec, ensure_ascii=False))
     else: sys.exit(__doc__)

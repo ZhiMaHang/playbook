@@ -52,7 +52,8 @@
     .preview-heading strong { font-weight: 500; color: var(--white); }
     .stage { width: 100%; aspect-ratio: 9 / 16; position: relative; container-type: inline-size; border: 1px solid #465062; border-radius: 22px; overflow: hidden; background: var(--bg); isolation: isolate; }
     .stage::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 25% 25%, #FFD7740B, transparent 52%); }
-    .ai-badge { position: absolute; top: 4.5%; right: 6.6667%; background: #0B1018CC; border: 1px solid #FFFFFF30; color: var(--white); font-size: 2.65cqw; line-height: 1.4; padding: 1cqw 1.45cqw; border-radius: 1.2cqw; z-index: 4; }
+    /* 尺寸与位置取自 render_text.py badge <png> 1080 1920 的 JSON（font_size 60、框 466×94、x 574、y 60、圆角 21），按 1cqw = 10.8px 换算 */
+    .ai-badge { position: absolute; top: 3.125%; right: 3.7037%; background: #0B1018CC; border: 1px solid #FFFFFF30; color: var(--white); font-size: 5.5556cqw; line-height: 1; padding: 1.5741cqw 3.6111cqw; border-radius: 1.9444cqw; z-index: 4; }
     .scene { position: absolute; inset: 0; }
     .motion-group { position: absolute; inset: 0; }
     .composition { position: absolute; left: 6.6667%; right: 16.6667%; top: 39%; height: 29%; }
@@ -145,7 +146,7 @@
         <p class="preview-heading"><strong>人物轮廓示意 · 无音频</strong><span>9:16</span></p>
         <div class="stage" id="stage">
           <div class="studio-backdrop" aria-hidden="true"></div>
-          <span class="ai-badge">视频由 AI 制作</span>
+          <span class="ai-badge">视频由 AI 生成</span>
           <article class="scene shot-medium" id="scene-opening" role="tabpanel" aria-labelledby="tab-opening">
             <div class="motion-group"><div class="composition portrait-composition"><svg class="portrait-art" viewBox="0 0 600 900" preserveAspectRatio="xMidYMin meet" role="img" aria-label="同一人物正面中景的抽象轮廓，无面部特征"><use href="#portrait-front"/></svg></div></div>
           </article>

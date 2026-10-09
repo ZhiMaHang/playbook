@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""AI 角标与成片元数据的自测:全部样本在临时目录里现造,不读写任何项目文件。
+用法: python3 aigc_selftest.py        # 全过打印 AIGC_SELFTEST_PASS,否则非零退出
+
+改 render_text.badge()、aigc_meta.py、compose.sh 的角标/元数据部分,或 verify_package.py 的
+角标/元数据检查之后,都跑这一条。覆盖:
+  1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅,解码第 0 帧、
+     1 s、2 s、末帧实测字形高;位置贴角;深浅两种底色过 verify_package 的像素判据;
+  2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
+     description 冲突护栏;compose.sh 端到端(多段不同元数据、/bin/bash 3.2 下的冲突用例);
+  3. verify_package.py:正例 exit 0;不叠角标、旧角标、画幅不符、缺说明字段、源键丢失、
+     缺 --badge-spec、缺 --source 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN。
+样本里的 AIGC 键只用假值(example-producer / test-000N),只为验证「原样保留」。
+"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
+HERE = Path(__file__).resolve().parent
+VERIFY = HERE.parents[1] / "zmh-short-video-pipeline/scripts/verify_package.py"
+
+# 期望值独立写死,不从被测代码里算:改坏 aigc_meta 的比例常量时这里才会变红
+CANVASES = [(1080, 1920), (1920, 1080), (1440, 2560), (720, 1280)]
+EXPECTED_MIN_PX = {(1080, 1920): 54, (1920, 1080): 54, (1440, 2560): 72, (720, 1280): 36}
+EXPECTED_MARGIN = {1080: (40, 60), 1440: (54, 80), 720: (26, 40)}
+DARK, LIGHT, WHITE = "0x202020", "0xF0F0F0", "0xFFFFFF"
+DURATION = 3
+
+STRIP_ALL = ["-map_metadata", "-1"]  # NEGATIVE_SAMPLE_ONLY:只用来造「源键丢失」反例
+
+
+def load(name: str):
+    spec = importlib.util.spec_from_file_location(name, HERE / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+meta = load("aigc_meta")
+rt = load("render_text")
+
+FAILURES: list[str] = []
+
+
+def check(ok: bool, name: str, detail: str = "") -> bool:
+    print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f": {detail}" if detail else ""))
+    if not ok:
+        FAILURES.append(name)
+    return ok
+
+
+def ff(*args: str) -> None:
+    result = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", *args],
+                            capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg {' '.join(args[-1:])} 失败: {result.stderr.strip()}")
+
+
+def aigc_value(produce_id: str) -> str:
+    return json.dumps({"Label": "AIGC", "ContentProducer": "example-producer", "ProduceID": produce_id,
+                       "ContentPropagator": "example-producer", "PropagateID": produce_id,
+                       "ReservedCode1": "", "ReservedCode2": ""}, separators=(",", ":"))
+
+
+SRC_TAGS = {
+    "title": "selftest title", "artist": "selftest artist", "comment": "selftest comment",
+    "AIGC": aigc_value("test-0001"),
+    "workflow": json.dumps({"nodes": [{"id": i, "type": "ExampleNode"} for i in range(60)]}),
+}
+
+
+def tag_args(tags: dict[str, str]) -> list[str]:
+    return [a for k, v in tags.items() for a in ("-metadata", f"{k}={v}")]
+
+
+def make_src(path: Path, w: int, h: int, color: str, tags: dict[str, str] = SRC_TAGS,
+             dur: float = DURATION) -> Path:
+    ff("-f", "lavfi", "-i", f"color=c={color}:s={w}x{h}:d={dur}:r=25",
+       "-f", "lavfi", "-i", f"sine=f=440:d={dur}",
+       "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac",
+       *tag_args(tags), "-movflags", "+use_metadata_tags", str(path))
+    return path
+
+
+def overlay(src: Path, png: Path | None, x: int, y: int, out: Path, extra: list[str]) -> Path:
+    if png is None:
+        ff("-i", str(src), "-map", "0:v", "-map", "0:a", "-c:v", "libx264", "-crf", "18",
+           "-pix_fmt", "yuv420p", "-c:a", "aac", *extra, str(out))
+    else:
+        ff("-i", str(src), "-loop", "1", "-i", str(png),
+           "-filter_complex", f"[0:v][1:v]overlay={x}:{y}:shortest=1[v]",
+           "-map", "[v]", "-map", "0:a", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+           "-c:a", "aac", *extra, str(out))
+    return out
+
+
+def ink_heights(video: Path, x: int, y: int, w: int, h: int) -> dict[str, int]:
+    """框内亮度 > 128 的像素外接框高度,取第 0 帧、1 s、2 s、末帧(不用 -ss,整段解码后按序号取)。"""
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(video), "-vf", f"format=gray,crop={w}:{h}:{x}:{y}",
+                          "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
+    frames = [raw[i:i + w * h] for i in range(0, len(raw) - w * h + 1, w * h)]
+    out = {}
+    for label, index in (("0", 0), ("1s", 25), ("2s", 50), ("末帧", len(frames) - 1)):
+        frame = frames[index]
+        rows = [r for r in range(h) if max(frame[r * w:(r + 1) * w]) > 128]
+        out[label] = rows[-1] - rows[0] + 1 if rows else 0
+    return out
+
+
+def old_badge(out: Path) -> tuple[int, int]:
+    """改版前的角标复刻(只作反例):字号 34、框高 60、措辞取退役登记第一条。"""
+    f, text = rt.font(34), meta.RETIRED_BADGE_TEXTS[0]
+    w = int(ImageDraw.Draw(Image.new("RGB", (1, 1))).textlength(text, font=f))
+    img = Image.new("RGBA", (w + 44, 60), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, w + 43, 59], radius=12, fill=(0, 0, 0, 95))
+    d.text((22, 9), text, font=f, fill=(255, 255, 255, 220))
+    img.save(out)
+    return img.size
+
+
+def verify(video: Path, *extra: str) -> tuple[int, str]:
+    result = subprocess.run([sys.executable, str(VERIFY), "--video", str(video), *extra],
+                            capture_output=True, text=True, check=False)
+    return result.returncode, result.stdout + result.stderr
+
+
+def dims(w: int, h: int) -> list[str]:
+    return ["--expected-width", str(w), "--expected-height", str(h)]
+
+
+def expect_fail(name: str, video: Path, item: str, *extra: str) -> None:
+    code, out = verify(video, *extra)
+    check(code != 0 and f"[FAIL] {item}" in out, f"verify 反例·{name}",
+          f"exit={code},点名「{item}」" if code else "竟然 exit 0")
+
+
+def section_badge(tmp: Path) -> dict:
+    print("\n== 1. 角标 ==")
+    check(meta.BADGE_TEXT not in meta.RETIRED_BADGE_TEXTS and meta.has_two_elements(meta.BADGE_TEXT),
+          "措辞常量:不在退役登记里且含两要素", meta.BADGE_TEXT)
+    old_cli = subprocess.run([sys.executable, str(HERE / "render_text.py"), "badge", str(tmp / "x.png")],
+                             capture_output=True, text=True, check=False)
+    check(old_cli.returncode != 0 and "<W> <H>" in old_cli.stderr, "旧 CLI 用法(不带宽高)报错并提示新用法")
+    try:
+        rt.badge(str(tmp / "x.png"))
+        check(False, "旧函数调用 badge(out) 报错")
+    except TypeError as exc:
+        check("width" in str(exc) and "height" in str(exc), "旧函数调用 badge(out) 报错", str(exc))
+
+    samples = {}
+    for (w, h) in CANVASES:
+        png = tmp / f"badge_{w}x{h}.png"
+        spec = rt.badge(str(png), width=w, height=h)
+        need = EXPECTED_MIN_PX[(w, h)]
+        mx, my = EXPECTED_MARGIN[min(w, h)]
+        on_disk = json.loads(Path(str(png) + ".json").read_text(encoding="utf-8"))
+        check(on_disk == spec and spec["canvas"] == [w, h], f"{w}x{h} 写出几何 JSON")
+        check(spec["font_size"] >= need, f"{w}x{h} 字号 ≥ {need}", str(spec["font_size"]))
+        check(spec["x"] >= 0 and spec["y"] >= 0 and spec["x"] + spec["w"] <= w and spec["y"] + spec["h"] <= h
+              and w - spec["x"] - spec["w"] == mx and spec["y"] == my,
+              f"{w}x{h} 框在画面内且贴右上角(边距 {mx},{my})",
+              f"({spec['x']},{spec['y']}) {spec['w']}x{spec['h']}")
+        for bg in (DARK, LIGHT):
+            src = make_src(tmp / f"src_{w}x{h}_{bg}.mp4", w, h, bg)
+            fin = overlay(src, png, spec["x"], spec["y"], tmp / f"fin_{w}x{h}_{bg}.mp4", meta.ffmpeg_args(src, 0))
+            samples[(w, h, bg)] = (src, fin, png)
+            if bg == DARK:
+                inks = ink_heights(fin, spec["x"], spec["y"], spec["w"], spec["h"])
+                check(all(v >= need for v in inks.values()), f"{w}x{h} 实测字形高 ≥ {need}", json.dumps(inks))
+            code, out = verify(fin, "--badge-spec", str(png) + ".json", "--source", str(src), *dims(w, h))
+            check(code == 0, f"verify 正例·{w}x{h} 底色 {bg}", "exit 0" if code == 0 else out[-600:])
+    for anchor in ("tl", "br", "bl"):
+        s = rt.badge(str(tmp / f"a_{anchor}.png"), width=1080, height=1920, anchor=anchor)
+        left, top = s["x"], s["y"]
+        right, bottom = 1080 - s["x"] - s["w"], 1920 - s["y"] - s["h"]
+        ok = (left if anchor[1] == "l" else right) == 40 and (top if anchor[0] == "t" else bottom) == 60
+        check(ok, f"anchor={anchor} 贴角(边距 40,60)", f"({left},{top}) 右 {right} 下 {bottom}")
+
+    # 反例:旧角标的字形实测确实过不了线,量法本身能抓出来
+    old_png = tmp / "old_badge.png"
+    ow, oh = old_badge(old_png)
+    src = samples[(1080, 1920, DARK)][0]
+    old_fin = overlay(src, old_png, 1080 - ow - 40, 60, tmp / "fin_old_badge.mp4", meta.ffmpeg_args(src, 0))
+    inks = ink_heights(old_fin, 1080 - ow - 40, 60, ow, oh)
+    check(all(v < 54 for v in inks.values()), "反例·旧角标实测字形高 < 54", json.dumps(inks))
+    old_spec = dict(rt.badge(str(tmp / "unused.png"), width=1080, height=1920))
+    old_spec.update(text=meta.RETIRED_BADGE_TEXTS[0], font_size=34, ink_height_px=min(inks.values()),
+                    x=1080 - ow - 40, y=60, w=ow, h=oh, png=old_png.name)
+    (tmp / "old_badge.png.json").write_text(json.dumps(old_spec, ensure_ascii=False), encoding="utf-8")
+    samples["old"] = (src, old_fin, old_png)
+    return samples
+
+
+def section_verify_negatives(tmp: Path, samples: dict) -> None:
+    print("\n== 3. verify_package.py 反例 ==")
+    src, fin, png = samples[(1080, 1920, DARK)]
+    spec = str(png) + ".json"
+    no_badge = overlay(src, None, 0, 0, tmp / "neg_no_badge.mp4", meta.ffmpeg_args(src, 0))
+    expect_fail("不叠角标(深底)", no_badge, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
+    white = make_src(tmp / "src_white.mp4", 1080, 1920, WHITE)
+    white_fin = overlay(white, None, 0, 0, tmp / "neg_white_no_badge.mp4", meta.ffmpeg_args(white, 0))
+    expect_fail("纯白底不叠角标", white_fin, "AI 角标像素", "--badge-spec", spec, "--source", str(white))
+    _, old_fin, _ = samples["old"]
+    expect_fail("旧角标配新几何", old_fin, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
+    old_spec = str(tmp / "old_badge.png.json")
+    expect_fail("旧角标·字高", old_fin, "AI 角标字高", "--badge-spec", old_spec, "--source", str(src))
+    expect_fail("旧角标·措辞", old_fin, "AI 角标措辞", "--badge-spec", old_spec, "--source", str(src))
+    big_src, big_fin, _ = samples[(1440, 2560, DARK)]
+    expect_fail("画幅不符", big_fin, "AI 角标画幅", "--badge-spec", spec, "--source", str(big_src), *dims(1440, 2560))
+    no_desc = overlay(src, png, *_xy(spec), tmp / "neg_no_desc.mp4",
+                      ["-map_metadata", "0", "-movflags", "+use_metadata_tags"])
+    expect_fail("缺说明字段", no_desc, "说明字段", "--badge-spec", spec, "--source", str(src))
+    stripped = overlay(src, png, *_xy(spec), tmp / "neg_stripped.mp4",
+                       STRIP_ALL + ["-metadata", f"description={meta.AI_DESCRIPTION}"])
+    expect_fail("源键丢失", stripped, "源元数据保留", "--badge-spec", spec, "--source", str(src))
+    expect_fail("缺 --badge-spec", fin, "AI 角标未机检", "--source", str(src))
+    expect_fail("缺 --source", fin, "源元数据保留未核", "--badge-spec", spec)
+
+    legacy = overlay(src, None, 0, 0, tmp / "legacy.mp4", STRIP_ALL)
+    expect_fail("旧片不带 --legacy-audit", legacy, "AI 角标未机检")
+    code, out = verify(legacy, "--legacy-audit")
+    check(code == 0 and "[WARN] AI 角标未机检" in out and "[WARN] 说明字段" in out
+          and "[WARN] 源元数据保留未核" in out and "[FAIL]" not in out,
+          "旧片带 --legacy-audit:新增项降为 WARN、exit 0", f"exit={code}")
+
+
+def _xy(spec_path: str) -> tuple[int, int]:
+    s = json.loads(Path(spec_path).read_text(encoding="utf-8"))
+    return s["x"], s["y"]
+
+
+def section_metadata(tmp: Path, samples: dict) -> None:
+    print("\n== 2. 元数据 ==")
+    src = samples[(1080, 1920, DARK)][0]
+    wav = tmp / "ext.wav"
+    ff("-f", "lavfi", "-i", f"sine=f=220:d={DURATION}", str(wav))
+    src_tags = meta.format_tags(src)
+    for index in (0, 1):
+        out = tmp / f"meta_src_at_{index}.mp4"
+        inputs = ["-i", str(src), "-i", str(wav)] if index == 0 else ["-i", str(wav), "-i", str(src)]
+        ff(*inputs, "-map", f"{index}:v", "-map", f"{1 - index}:a", "-c:v", "libx264", "-crf", "18",
+           "-pix_fmt", "yuv420p", "-c:a", "aac", *meta.ffmpeg_args(src, index), str(out))
+        tags = meta.format_tags(out)
+        for key in ("AIGC", "workflow", "title", "artist", "comment"):
+            check(tags.get(key) == src_tags.get(key), f"源片在第 {index} 路·{key} 逐字保留")
+        check(tags.get("description") == meta.AI_DESCRIPTION and meta.has_two_elements(tags.get("description")),
+              f"源片在第 {index} 路·description 为说明字段且含两要素")
+        check(all(";" not in tags.get(k, "") for k in meta.BRAND_KEYS), f"源片在第 {index} 路·brand 三键无重复值",
+              json.dumps({k: tags.get(k) for k in meta.BRAND_KEYS}))
+        problems = meta.compare(out, src)
+        check(not problems, f"源片在第 {index} 路·compare 无问题", "; ".join(problems))
+        check(any("workflow" in f for f in meta.privacy_flags(out)), f"源片在第 {index} 路·privacy_flags 提示 workflow")
+
+    clash = make_src(tmp / "src_desc.mp4", 1080, 1920, DARK, dict(SRC_TAGS, description="SRCDESC"), dur=1)
+    try:
+        meta.ffmpeg_args(clash, 0)
+        check(False, "冲突护栏:源片已有 description 时 ffmpeg_args 抛错")
+    except meta.DescriptionConflict as exc:
+        check(True, "冲突护栏:源片已有 description 时 ffmpeg_args 抛错", str(exc)[-40:])
+    cli = subprocess.run([sys.executable, str(HERE / "aigc_meta.py"), "args", str(clash), "0"],
+                         capture_output=True, text=True, check=False)
+    check(cli.returncode != 0 and not cli.stdout.strip(), "冲突护栏:CLI args 非零退出且不输出参数")
+
+
+def section_compose(tmp: Path) -> None:
+    print("\n== 2b. compose.sh 端到端(/bin/bash) ==")
+    seg_dur = {"dh1": 1.2, "card": 1.0, "dh2": 1.2}
+
+    def build(work: Path, first_tags: dict[str, str]) -> None:
+        work.mkdir()
+        make_src(work / "dh1.mp4", 1088, 1920, "0x404858", first_tags, dur=seg_dur["dh1"])
+        make_src(work / "dh2.mp4", 1088, 1920, "0x485840", dict(SRC_TAGS, AIGC=aigc_value("test-0002")),
+                 dur=seg_dur["dh2"])
+        Image.new("RGB", (1080, 1920), (40, 60, 90)).save(work / "card.png")
+        ff("-f", "lavfi", "-i", f"sine=f=330:d={seg_dur['card']}", str(work / "card.wav"))
+        for n in (1, 2, 3):
+            (work / f"s{n}.txt").write_text(f"自测字幕第{n}段", encoding="utf-8")
+        (work / "segments.txt").write_text(
+            "dh dh1.mp4 - s1.txt\ncard card.png card.wav s2.txt\ndh dh2.mp4 - s3.txt\n", encoding="utf-8")
+
+    bash = "/bin/bash"
+    work = tmp / "compose_ok"
+    build(work, SRC_TAGS)
+    out = tmp / "compose_ok.mp4"
+    run = subprocess.run([bash, str(HERE / "compose.sh"), str(work), str(out)],
+                         capture_output=True, text=True, check=False)
+    if not check(run.returncode == 0 and out.is_file(), "compose.sh 正常出片", run.stderr.strip()[-400:]):
+        return
+    check("⚠️" in run.stdout, "compose.sh 各段元数据不同时打印 ⚠️")
+    tags = meta.format_tags(out)
+    check(tags.get("AIGC") == SRC_TAGS["AIGC"], "compose 成片带第一段的 AIGC")
+    check(tags.get("description") == meta.AI_DESCRIPTION, "compose 成片带说明字段")
+    check(not meta.compare(out, work / "dh1.mp4"), "compose 成片对第一段源片 compare 无问题")
+    side = Path(str(out) + ".source-metadata.json")
+    data = json.loads(side.read_text(encoding="utf-8")) if side.is_file() else {"segments": []}
+    ids = [json.loads(s["tags"].get("AIGC", "{}")).get("ProduceID") for s in data["segments"]]
+    check(ids == ["test-0001", "test-0002"], "sidecar 记下两段的 AIGC", json.dumps(ids))
+    duration = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                     str(out)], capture_output=True, text=True, check=True).stdout)
+    check(abs(duration - sum(seg_dur.values())) <= 0.1, "compose 成片时长 ≈ 各段之和(±0.1 s)",
+          f"{duration:.3f} vs {sum(seg_dur.values()):.3f}")
+    spec_path = work / "_tmp/badge.png.json"
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    inks = ink_heights(out, spec["x"], spec["y"], spec["w"], spec["h"])
+    check(all(v >= 54 for v in inks.values()), "compose 成片实测字形高 ≥ 54", json.dumps(inks))
+    code, report = verify(out, "--badge-spec", str(spec_path), "--source", str(work / "dh1.mp4"))
+    check(code == 0, "verify 正例·compose 成片", "exit 0" if code == 0 else report[-600:])
+
+    work2 = tmp / "compose_clash"
+    build(work2, dict(SRC_TAGS, description="SRCDESC"))
+    out2 = tmp / "compose_clash.mp4"
+    check(not out2.exists(), "冲突用例输出路径事先不存在")
+    run2 = subprocess.run([bash, str(HERE / "compose.sh"), str(work2), str(out2)],
+                          capture_output=True, text=True, check=False)
+    check(run2.returncode != 0 and "aigc_meta.py" in run2.stderr and "unbound variable" not in run2.stderr
+          and not out2.exists(), "compose 路径 description 冲突:非零退出、护栏报错、不出片",
+          f"exit={run2.returncode} 出片={out2.exists()} stderr={run2.stderr.strip()[-160:]}")
+
+
+def main() -> int:
+    for tool in ("ffmpeg", "ffprobe"):
+        if not shutil.which(tool):
+            print(f"[FAIL] 缺 {tool}")
+            return 1
+    if not check(VERIFY.is_file(), "找到 verify_package.py", str(VERIFY.name)):
+        return 1
+    tmp = Path(tempfile.mkdtemp(prefix="aigc_selftest_"))
+    try:
+        samples = section_badge(tmp)
+        section_metadata(tmp, samples)
+        section_compose(tmp)
+        section_verify_negatives(tmp, samples)
+    finally:
+        if os.environ.get("AIGC_SELFTEST_KEEP"):
+            print(f"\n样本保留在 {tmp}")
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
+    if FAILURES:
+        print(f"\n{len(FAILURES)} 项失败: " + "、".join(FAILURES))
+        return 1
+    print("\nAIGC_SELFTEST_PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

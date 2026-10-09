@@ -148,8 +148,48 @@ ffprobe -v error -show_entries format=duration -show_entries stream=codec_name,s
 - 标题元数据与字幕分开：字幕必须覆盖锁定口播的全部实际发声，包括第一句；如果第一句口播与本期标题或封面钩子文字重合，仍按口播正常进入字幕源文件并烧录。不得把没有实际口播的封面标题、文档标题、栏目名或标签额外混入字幕。
 - 每期在完整字幕基础上做特效字幕：按发声时机高亮关键原词，可在重要数字或结论处加单次轻微放大/淡入。避免逐字弹跳、闪白和频繁音效；不以少量大字替代完整口播字幕，不添加未口播的新结论。
 - 显式 AI 角标烧进成片；平台发布页的 AI 声明是另一道标识，不能二选一。
+- 角标基线（按 GB 45438-2025 图解所列数值自设）：措辞取 `digital-human-video/scripts/aigc_meta.py` 的 `BADGE_TEXT`（现为「视频由 AI 生成」），同时含「AI／人工智能」和「生成／合成」两要素；字号和整行墨迹高都不低于成片最短边的 5%；从第 0 帧起全程显示，默认右上角，边距按最短边比例。
+- 按成片**实际分辨率**调用 `render_text.badge(out, width=W, height=H)`（命令行 `render_text.py badge <out.png> <W> <H>`），叠在它写出的 `<out.png>.json` 给的 `x:y` 上，全程显示；不写死字号，也不写死 `overlay=W-w-40:60`。验收把这份 JSON 传给 `verify_package.py --badge-spec`。
 - 可复用 `digital-human-video/scripts/render_text.py` 与 `compose.sh` 的字幕、角标和画幅处理逻辑；若是单条现成 MP4，可按同样样式建立本期专用 ffmpeg 滤镜，但必须把命令或参数留在过程目录。
-- 字幕字体、字号、每行长度、安全区，以及角标文字、位置、尺寸和持续时间，沿用当前仓库脚本和上一期终版这一可验证单一来源，不从记忆重写。项目当前脚本若显示“视频由 AI 制作”，就保持一致；任何改版先在台账记录。
+- 字幕字体、字号、每行长度、安全区沿用当前仓库脚本和上一期终版这一可验证单一来源，不从记忆重写；角标文字、尺寸和位置只以 `aigc_meta.py` 与 `render_text.badge()` 为准，不沿用旧期脚本里的写法。任何改版先在台账记录。
+- 退役措辞登记（只许出现在本表，角标、字幕、文档都不许再用）：
+
+| 措辞 | 状态 |
+|---|---|
+| 视频由 AI 制作 | ⛔ 已退役，不许再用（缺「生成／合成」要素） |
+| 内容由 AI 制作 | ⛔ 已退役，不许再用（缺「生成／合成」要素） |
+
+### 成片元数据
+
+- 成片**保留源片的全部元数据**，包括服务商写入的 `AIGC` 等隐式标识，以及 ComfyUI 原始输出自带的 `workflow`／`prompt`；只另写一条 `description` 普通说明（`aigc_meta.AI_DESCRIPTION`）。
+- 我方不是生成合成服务提供者：⛔ 不写 `AIGC`、`ContentProducer`、`ProduceID` 这类形似服务商隐式标识的键。源片原有的这些键原样保留，不删、不改。
+- ⛔ 禁用 `-map_metadata -1`（它会清空源元数据）。从旧期复制脚本时，先删掉 `-map_metadata -1` 和写死的 `overlay=W-w-40:60`，再按下面的写法改。
+- 编码命令追加 `aigc_meta.ffmpeg_args(源片, 源片输入序号)` 返回的参数：映射源片元数据、清掉会被写成重复值的 brand 三键、写说明字段、`+faststart+use_metadata_tags`。输入序号必须显式给：不写时 ffmpeg 取第 0 路的元数据，源片不在第 0 路就整套丢光。
+- 源片已有 `description` 时 `ffmpeg_args` 直接报错、不覆盖，交人处理。
+- `workflow`／`prompt` 键可能带工作流、模型文件名和提示词：按原样保留，`verify_package.py` 只报 WARN 提示，发不发由人决定。
+- 多段拼接时一个文件只留一份隐式标识：容器保留第一段源文件的元数据，全部片段的元数据写进本地 `<终版.mp4>.source-metadata.json`（不上传）；各段不同时 `compose.sh` 打印 ⚠️。
+- 带 `use_metadata_tags` 后所有键都写进 mdta `keys` 盒，只认 iTunes 风格 `©nam`、`desc` 的读取器读不到标题和说明，这是已知取舍；ffprobe 两种都能读。
+
+示例（路径都是占位符）：
+
+```python
+import importlib.util
+from pathlib import Path
+
+PLAYBOOK = Path("<playbook 仓根>")
+spec = importlib.util.spec_from_file_location(
+    "aigc_meta", PLAYBOOK / "skills/digital-human-video/scripts/aigc_meta.py")
+aigc_meta = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(aigc_meta)
+
+src = "<源片.mp4>"                              # 本条命令的第 0 路输入
+cmd = ["ffmpeg", "-y", "-i", src, "-i", "<配音.wav>",
+       # …滤镜、-map、编码参数…
+       *aigc_meta.ffmpeg_args(src, 0),           # 保留源元数据 + 说明字段 + brand 三键清理
+       "<终版.mp4>"]
+```
+
+出片后可单独核一次：`python3 <playbook 仓根>/skills/digital-human-video/scripts/aigc_meta.py check <终版.mp4> --source <源片.mp4>`。
 
 ### BGM 与响度
 
@@ -205,6 +245,8 @@ YouTube Shorts 独立的 9:16 `封面-youtube-shorts.png` 必须在第二步生�
 ```bash
 python3 scripts/verify_package.py \
   --video <终版.mp4> \
+  --badge-spec <角标.png.json> \
+  --source <源片.mp4> \
   --cover-vertical <封面.png> \
   --cover-bilibili <封面-横4x3.png> \
   --cover-youtube-shorts <封面-youtube-shorts.png> \
@@ -218,11 +260,13 @@ python3 scripts/verify_package.py \
 ```bash
 python3 scripts/verify_package.py \
   --video <预览终版.mp4> \
+  --badge-spec <角标.png.json> \
+  --source <源片.mp4> \
   --max-duration <目标上限秒数> \
   --target-lufs -14 --lufs-tolerance 2
 ```
 
-脚本不修改源视频或封面，但 `--frames-dir` 会创建/覆盖抽帧，`--json-out` 会写报告；严格只读审计时省略这两个参数。默认的 1080×1920、H.264/AAC 与三版平台封面尺寸是智码航当前交付规格；项目规格不同时显式传参或只做对应检查。脚本不能识别字幕语义、辅助素材是否匹配讲解、字幕动效是否合适、角标文字、版权或口型，这些项目必须实际观看核对。
+脚本不修改源视频或封面，但 `--frames-dir` 会创建/覆盖抽帧，`--json-out` 会写报告；严格只读审计时省略这两个参数。默认的 1080×1920、H.264/AAC 与三版平台封面尺寸是智码航当前交付规格；项目规格不同时显式传参或只做对应检查。脚本能机检角标尺寸、位置、全程出现和措辞常量（按 `--badge-spec` 的几何与角标 PNG 逐秒比对像素），以及源元数据保留和说明字段，**不能 OCR**；缺 `--badge-spec` 或 `--source` 直接 FAIL（「AI 角标未机检」「源元数据保留未核」）。只读审计已发布旧片时加 `--legacy-audit`，这几项降为 WARN，不能据此写 `FINAL_QA_PASS`。脚本不能识别字幕语义、辅助素材是否匹配讲解、字幕动效是否合适、版权或口型，这些项目必须实际观看核对。
 
 人工必须完成：
 
