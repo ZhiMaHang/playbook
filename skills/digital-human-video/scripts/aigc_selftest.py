@@ -4,11 +4,11 @@
 
 改 render_text.badge()、aigc_meta.py、compose.sh 的角标/元数据部分,或 verify_package.py 的
 角标/元数据检查之后,都跑这一条。覆盖:
-  1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅,解码第 0 帧、
+  1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅,另有 432x768／360x640／540x960／610x1084 小画幅,解码第 0 帧、
      1 s、2 s、末帧实测字形高;位置贴角;深浅两种底色过 verify_package 的像素判据;
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏、creation_time(普通源片、mdta 源片「X;X」与「A;B」都不让 mvhd 归零、真被改仍判变)、
-     封装器键不同的源片(含 Matroska 大写键名);小画幅角标;compose.sh 端到端(多段不同元数据、全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
+     封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
      变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标、一帧停留跨过整秒掉角标都要抓到;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
      几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧;
@@ -224,6 +224,22 @@ def section_badge(tmp: Path) -> dict:
         bare = overlay(src_s, None, 0, 0, tmp / f"neg_{w}x{h}_no_badge.mp4", meta.ffmpeg_args(src_s, 0))
         code, out = verify(bare, "--badge-spec", str(png_s) + ".json", "--source", str(src_s), *dims(w, h))
         check(code != 0 and "[FAIL] AI 角标像素:" in out, f"verify 反例·小画幅 {w}x{h} 不叠角标", f"exit={code}")
+    # 腐蚀后掩码偏在少数字上的字号(短边 ≤ 680 一带):盖住其余的字也要抓到
+    for (w, h), cover_frac, what in (((540, 960), 3, "「视频」"), ((610, 1084), 5, "左五分之一")):
+        png_m = tmp / f"badge_{w}x{h}.png"
+        spec_m = rt.badge(str(png_m), width=w, height=h)
+        src_m = make_src(tmp / f"src_{w}x{h}.mp4", w, h, DARK)
+        fin_m = overlay(src_m, png_m, spec_m["x"], spec_m["y"], tmp / f"fin_{w}x{h}.mp4", meta.ffmpeg_args(src_m, 0))
+        code, out = verify(fin_m, "--badge-spec", str(png_m) + ".json", "--source", str(src_m), *dims(w, h))
+        check(code == 0, f"verify 正例·{w}x{h}(字号 {spec_m['font_size']})", "exit 0" if code == 0 else out[-300:])
+        covered = tmp / f"neg_{w}x{h}_cover.mp4"
+        cover = (f"drawbox=x={spec_m['x']}:y={spec_m['y']}:w={spec_m['w'] // cover_frac}:h={spec_m['h']}"
+                 ":color=black:t=fill:enable='between(t,1,2.5)'")
+        ff("-i", str(src_m), "-loop", "1", "-i", str(png_m), "-filter_complex",
+           f"[0:v][1:v]overlay={spec_m['x']}:{spec_m['y']}:shortest=1,{cover}[v]", "-map", "[v]", "-map", "0:a",
+           "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", *meta.ffmpeg_args(src_m, 0), str(covered))
+        code, out = verify(covered, "--badge-spec", str(png_m) + ".json", "--source", str(src_m), *dims(w, h))
+        check(code != 0 and "[FAIL] AI 角标像素:" in out, f"verify 反例·{w}x{h} 盖住{what} 1.5 s", f"exit={code}")
     for anchor in ("tl", "br", "bl"):
         s = rt.badge(str(tmp / f"a_{anchor}.png"), width=1080, height=1920, anchor=anchor)
         left, top = s["x"], s["y"]
@@ -539,6 +555,20 @@ def section_metadata(tmp: Path, samples: dict) -> None:
               and same and not meta.compare(ab_out, ab),
               f"mdta 源片 creation_time 读成「A;B」({label}):mvhd 不归零、读回逐字相同",
               f"{meta.format_tags(ab)['creation_time']} → mvhd {mvhd_creation_time(ab_out)}")
+    vhs = make_src(tmp / "src_vhs_now.mp4", 320, 240, DARK, {"title": "vhs", "creation_time": "now"}, dur=1)
+    vhs_out = tmp / "meta_vhs_now.mp4"
+    ff("-i", str(vhs), "-c", "copy", *meta.ffmpeg_args(vhs, 0), str(vhs_out))
+    check(meta.format_tags(vhs)["creation_time"].endswith(";now") and mvhd_creation_time(vhs_out) == mvhd_creation_time(vhs)
+          and not meta.compare(vhs_out, vhs),
+          "creation_time 原串是 now(ComfyUI VHS 保存节点默认):mvhd 不变、compare 不误报",
+          f"{meta.format_tags(vhs)['creation_time']} → mvhd {mvhd_creation_time(vhs)}/{mvhd_creation_time(vhs_out)}")
+    mkv_ct = tmp / "src_mkv_subsecond.mkv"
+    ff("-f", "lavfi", "-i", f"color=c={DARK}:s=320x240:d=1:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+       "-metadata", "creation_time=2026-08-04T12:34:56.500000Z", str(mkv_ct))
+    mkv_ct_out = tmp / "meta_mkv_subsecond.mp4"
+    ff("-i", str(mkv_ct), "-c", "copy", *meta.ffmpeg_args(mkv_ct, 0), str(mkv_ct_out))
+    check(not meta.compare(mkv_ct_out, mkv_ct), "Matroska 源片 creation_time 带小数秒(MP4 的 mvhd 只到秒)不误报",
+          "; ".join(meta.compare(mkv_ct_out, mkv_ct)))
     brand = tmp / "src_brand_mp42.mp4"
     ff("-f", "lavfi", "-i", "color=c=0x202020:s=320x240:d=1:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p",
        "-brand", "mp42", "-metadata", "title=brand", str(brand))

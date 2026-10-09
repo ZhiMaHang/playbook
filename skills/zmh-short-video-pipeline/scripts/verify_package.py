@@ -23,13 +23,14 @@ from typing import Any
 AIGC_META_PATH = Path(__file__).resolve().parents[2] / "digital-human-video/scripts/aigc_meta.py"
 
 # 角标像素判据(合成样本正反例校准,依据见 digital-human-video/scripts/aigc_selftest.py):
-# ① 字形处亮度 ≥ 170 的像素占比 ≥ 95%(白字 alpha 220,叠上去理论亮度 ≥ 220,H.264 编码后实测最低约 213);
+# ① 字形处亮度 ≥ 170 的像素占比 ≥ 95%(白字 alpha 220,叠上去理论亮度 ≥ 220;腐蚀后的掩码 H.264 编码后实测最低约 213,
+#    小字号退回不腐蚀的掩码时含笔画边缘,个别像素低到约 150,按占比判不受影响);
 # ② 字形与底框的亮度中位数差 ≥ 40。只有 ① 不够:纯白画面上没有角标也能过 ①。
 GLYPH_ALPHA_MIN = 200   # 角标 PNG 里 alpha ≥ 200 的像素是字形,腐蚀 1 px 后作字形掩码
 BOX_ALPHA_MAX = 100     # 0 < alpha ≤ 100 是底框
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")   # 环境里设了 AV_LOG_FORCE_COLOR 时 ffmpeg 日志带颜色码
 SHOWINFO_PTS = re.compile(r"\] n:\s*\d+\s+pts:\s*\S+\s+pts_time:\s*([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)")
-GLYPH_MASK_MIN_PX = 200   # 腐蚀后少于这么多像素(字号小、笔画撑不过腐蚀,如短边 ≤ 540)就改用不腐蚀的掩码
+GLYPH_BANDS, GLYPH_BAND_MIN_SHARE = 5, 0.10   # 字形横向五等分:腐蚀后任一段留不到一成像素就改用不腐蚀的掩码
 GLYPH_INK_ALPHA = 158   # 量 PNG 实际字高:底框 95、白字 220,alpha ≥ 158 约等于字形覆盖过半,与渲染时「L 模式 >128」口径一致(实测四画幅与 JSON 相同)
 GLYPH_LUMA_MIN = 170
 GLYPH_RATIO_MIN = 0.95
@@ -396,8 +397,9 @@ def png_alpha(path: Path, width: int, height: int) -> bytes | None:
 
 
 def badge_masks(alpha: bytes, width: int, height: int) -> tuple[list[int], list[int]]:
-    """字形掩码 = alpha ≥ GLYPH_ALPHA_MIN 再腐蚀 1 px（3×3 邻域全是字形才留下），腐蚀后太少时退回不腐蚀的；
-    底框掩码 = 0 < alpha ≤ BOX_ALPHA_MAX。"""
+    """字形掩码 = alpha ≥ GLYPH_ALPHA_MIN 再腐蚀 1 px（3×3 邻域全是字形才留下）；底框掩码 = 0 < alpha ≤ BOX_ALPHA_MAX。
+    字号小时腐蚀会把某几个字整个吃掉（短边 ≤ 680 一带），只剩的掩码偏在少数字上，盖住别的字也看不出；
+    所以字形横向五等分，腐蚀后任一段剩不到一成就整体退回不腐蚀的掩码。短边 720 及以上不触发。"""
     raw = [value >= GLYPH_ALPHA_MIN for value in alpha]
     glyph = [
         y * width + x
@@ -405,8 +407,17 @@ def badge_masks(alpha: bytes, width: int, height: int) -> tuple[list[int], list[
         for x in range(1, width - 1)
         if all(raw[(y + dy) * width + x + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1))
     ]
-    if len(glyph) < GLYPH_MASK_MIN_PX:
-        glyph = [index for index, keep in enumerate(raw) if keep]
+    full = [index for index, keep in enumerate(raw) if keep]
+    if full:
+        left = min(i % width for i in full)
+        span = max(i % width for i in full) + 1 - left
+        kept, total = [0] * GLYPH_BANDS, [0] * GLYPH_BANDS
+        for i in full:
+            total[min(GLYPH_BANDS - 1, (i % width - left) * GLYPH_BANDS // span)] += 1
+        for i in glyph:
+            kept[min(GLYPH_BANDS - 1, (i % width - left) * GLYPH_BANDS // span)] += 1
+        if any(t and k < GLYPH_BAND_MIN_SHARE * t for k, t in zip(kept, total)):
+            glyph = full
     box = [index for index, value in enumerate(alpha) if 0 < value <= BOX_ALPHA_MAX]
     return glyph, box
 

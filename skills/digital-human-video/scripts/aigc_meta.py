@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime, timedelta, timezone
 import re
 import subprocess
 import sys
@@ -32,10 +33,25 @@ INK_SAFETY_PX = 2        # 渲染时墨迹再多留 2 px,吸收编码带来的�
 # 由封装器决定、和源片无关的键:比对时排除(不分大小写:Matroska/WebM 源片读出来是 ENCODER)
 MUXER_KEYS = {"major_brand", "minor_version", "compatible_brands", "encoder"}
 BRAND_KEYS = ("major_brand", "minor_version", "compatible_brands")
-# 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「mvhd 值;mdta 原串」读出,比对前按集合比。
+# 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「mvhd 值;mdta 原串」读出。
 # 源片本身已带「;」(源片也是 use_metadata_tags 写的)时原样映射过去,封装器解析不了,mvhd 的创建时间会被写成 0,
-# 所以 ffmpeg_args 显式写回 mdta 原串(最后一段):终版读回来和源片逐字相同,mvhd 也保住。
+# 所以 ffmpeg_args 显式写回一个值:mdta 原串是带时区的绝对时间就写它(终版读回与源片逐字相同);
+# 不是(如 ComfyUI 的 VHS 保存节点写的 now、或不带时区的本地时间)就写 mvhd 那半(已归一成 UTC),
+# 否则封装器会按出片时刻或出片机时区重新解析,创建时间就变了。
 DUAL_STORED_KEYS = {"creation_time"}
+ABS_TIME_RE = re.compile(
+    r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.\d+)?(Z|[+-]\d\d:?\d\d)")
+
+
+def _utc_second(text: str) -> datetime | None:
+    """带时区的绝对时间 → 精确到秒的 UTC 时刻;不是这种格式返回 None。"""
+    m = ABS_TIME_RE.fullmatch(text.strip())
+    if not m:
+        return None
+    tz = m.group(7)
+    offset = timedelta(0) if tz == "Z" else timedelta(
+        hours=int(tz[1:3]), minutes=int(tz[-2:])) * (1 if tz[0] == "+" else -1)
+    return datetime(*(int(g) for g in m.groups()[:6]), tzinfo=timezone(offset)).astimezone(timezone.utc)
 
 PRIVATE_KEYS = {"workflow", "prompt"}   # ComfyUI 原始输出自带,含工作流、模型名和提示词
 WINDOWS_PATH_RE = re.compile(r"(?<![A-Za-z])[A-Za-z]:[\\/]")
@@ -87,17 +103,23 @@ def ffmpeg_args(source_path: str | Path | None, input_index: int | None) -> list
             raise ValueError(f"源片输入序号必须 ≥ 0,收到 {index}")
         mapping = ["-map_metadata", str(index)]
         for key in sorted(DUAL_STORED_KEYS & tags.keys()):
-            if ";" in tags[key]:
-                mapping += ["-metadata", f"{key}={tags[key].split(';')[-1]}"]
+            parts = tags[key].split(";")
+            if len(parts) > 1:
+                keep = parts[-1] if _utc_second(parts[-1]) else parts[0]
+                mapping += ["-metadata", f"{key}={keep}"]
     clear_brands = [a for k in BRAND_KEYS for a in ("-metadata", f"{k}=")]
     return mapping + clear_brands + ["-metadata", f"description={AI_DESCRIPTION}",
                                      "-movflags", "+faststart+use_metadata_tags"]
 
 
-def _same_value(key: str, a: str, b: str) -> bool:
+def _same_value(key: str, final: str, source: str) -> bool:
     if key in DUAL_STORED_KEYS:
-        return set(a.split(";")) == set(b.split(";"))
-    return a == b
+        fin, src = final.split(";"), source.split(";")
+        if _utc_second(src[-1]):   # 源片原串是绝对时间:终版的原串(最后一段)必须逐字相同
+            return fin[-1] == src[-1]
+        # 源片原串不是绝对时间(now、本地时间):只比两边能解析的时刻,精确到秒
+        return {t for t in map(_utc_second, fin) if t} == {t for t in map(_utc_second, src) if t}
+    return final == source
 
 
 def compare(final: str | Path, source: str | Path) -> list[str]:
