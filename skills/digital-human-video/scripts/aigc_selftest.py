@@ -13,8 +13,8 @@
      封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、首段是 clip、
      全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
   3. verify_package.py:正例 exit 0(含变帧率、头部或头尾 -c copy 剪过、音轨比画面长、mdat 长度未声明时
-     只报 WARN、ffmpeg 彩色日志);以下都必须 FAIL 并点名检查项:不叠角标、角标晚出/只在开头/中段掉了/
-     末尾掉了、变帧率慢段或一帧停留跨过整秒时掉角标、淡角标、65% 不透明度、左边缘被盖 70 px、插入面板盖住
+     只报 WARN、ffmpeg 彩色日志);以下都必须 FAIL 并点名检查项:不叠角标、只有第 0 帧或只有末帧没角标、角标晚出/只在开头/
+     中段掉了/末尾掉了、变帧率慢段或一帧停留跨过整秒时掉角标、淡角标、65% 不透明度、左边缘被盖 70 px、插入面板盖住
      部分角标、白闪盖过角标、旧角标、几何 JSON 墨迹或字号不足或字段不合格、JSON 自报够但 PNG 实测不够、
      措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧、画幅不符、缺说明字段、
      源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、脱离插件目录
@@ -301,6 +301,9 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     stripped = overlay(src, png, *_xy(spec), tmp / "neg_stripped.mp4",
                        STRIP_ALL + ["-metadata", f"description={meta.AI_DESCRIPTION}"])
     expect_fail("源键丢失", stripped, "源元数据保留", "--badge-spec", spec, "--source", str(src))
+    for label, enable in (("只有第 0 帧没角标(首帧封面那种)", "gte(n,1)"), ("只有末帧(2.96 s)没角标", f"lte(n,{25 * DURATION - 2})")):
+        one = overlay(src, png, *_xy(spec), tmp / f"neg_one_frame_{enable[:3]}.mp4", meta.ffmpeg_args(src, 0), enable)
+        expect_fail(label, one, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     late_start = overlay(src, png, *_xy(spec), tmp / "neg_badge_late_start.mp4", meta.ffmpeg_args(src, 0), "gte(t,0.2)")
     expect_fail("角标 0.2 s 才出现(首帧没有)", late_start, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     early = overlay(src, png, *_xy(spec), tmp / "neg_badge_early_only.mp4", meta.ffmpeg_args(src, 0), "lt(t,0.5)")
