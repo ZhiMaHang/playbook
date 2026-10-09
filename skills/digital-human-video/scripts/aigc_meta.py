@@ -35,7 +35,7 @@ MUXER_KEYS = {"major_brand", "minor_version", "compatible_brands", "encoder"}
 BRAND_KEYS = ("major_brand", "minor_version", "compatible_brands")
 # 既写 mvhd 又写 mdta 的键:带 use_metadata_tags 时 ffprobe 把两处拼成「mvhd 值;mdta 原串」读出。
 # 源片本身已带「;」(源片也是 use_metadata_tags 写的)时原样映射过去,封装器解析不了,mvhd 的创建时间会被写成 0,
-# 所以 ffmpeg_args 显式写回一个值:mdta 原串是带时区的绝对时间(T 分隔,Z 或 ±hh:mm)就写它(终版读回与源片逐字相同);
+# 所以 ffmpeg_args 显式写回一个值:mdta 原串是带时区的绝对时间(T 分隔,Z、±hh:mm 或 ±hhmm)就写它(终版读回与源片逐字相同);
 # 不是(如 ComfyUI 的 VHS 保存节点写的 now、或不带时区的本地时间)就写 mvhd 那半(已归一成 UTC),
 # 否则封装器会按出片时刻或出片机时区重新解析,创建时间就变了。
 DUAL_STORED_KEYS = {"creation_time"}

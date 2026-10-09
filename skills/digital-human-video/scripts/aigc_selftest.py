@@ -9,7 +9,7 @@
      另有 432x768／360x640／540x960／610x1084 小画幅的 verify 正反例;
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏、creation_time(普通源片、mdta 源片「X;X」与「A;B」都不让 mvhd 归零、真被改仍判变)、
-     封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
+     封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、首段是 clip、全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
      变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标、一帧停留跨过整秒掉角标都要抓到;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
      几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧;
@@ -642,6 +642,17 @@ def section_metadata(tmp: Path, samples: dict) -> None:
             check(False, f"冲突护栏:源片 description 是{label}时也报冲突")
         except meta.DescriptionConflict:
             check(True, f"冲突护栏:源片 description 是{label}时也报冲突")
+    mkv_desc = tmp / "src_desc.mkv"
+    ff("-f", "lavfi", "-i", f"color=c={DARK}:s=320x240:d=1:r=25", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+       "-metadata", "description=SRC DESC", str(mkv_desc))
+    try:
+        meta.ffmpeg_args(mkv_desc, 0)
+        raised = False
+    except meta.DescriptionConflict:
+        raised = True
+    cli = meta_cli("args", str(mkv_desc), "0")
+    check("DESCRIPTION" in meta.format_tags(mkv_desc) and raised and cli.returncode == 2,
+          "冲突护栏:Matroska 源片的 DESCRIPTION(大写键名)也报冲突", f"args exit={cli.returncode}")
     clash = make_src(tmp / "src_desc.mp4", 1080, 1920, DARK, dict(SRC_TAGS, description="SRCDESC"), dur=1)
     try:
         meta.ffmpeg_args(clash, 0)
@@ -708,6 +719,23 @@ def section_compose(tmp: Path) -> None:
            *args_txt.stdout.splitlines(), str(peiyue))
         check(not meta.compare(peiyue, work / "dh1.mp4"), "成片再混音(按 SKILL.md 命令):对第一段源片 compare 无问题",
               "; ".join(meta.compare(peiyue, work / "dh1.mp4")))
+
+    clips = tmp / "compose_clip_first"
+    clips.mkdir()
+    make_src(clips / "clip1.mp4", 1088, 1920, "0x405060", SRC_TAGS, dur=1.5)
+    ff("-f", "lavfi", "-i", "sine=f=300:d=1.2", str(clips / "narr.wav"))
+    Image.new("RGB", (1080, 1920), (40, 60, 90)).save(clips / "card.png")
+    ff("-f", "lavfi", "-i", "sine=f=330:d=1", str(clips / "card.wav"))
+    for n in (1, 2):
+        (clips / f"s{n}.txt").write_text(f"生成视频段第{n}段", encoding="utf-8")
+    (clips / "segments.txt").write_text("clip clip1.mp4 narr.wav s1.txt\ncard card.png card.wav s2.txt\n", encoding="utf-8")
+    clip_out = tmp / "compose_clip_first.mp4"
+    run4 = subprocess.run([bash, str(HERE / "compose.sh"), str(clips), str(clip_out)],
+                          capture_output=True, text=True, check=False)
+    ctags = meta.format_tags(clip_out) if clip_out.is_file() else {}
+    check(run4.returncode == 0 and ctags.get("AIGC") == SRC_TAGS["AIGC"] and ctags.get("description") == meta.AI_DESCRIPTION
+          and Path(str(clip_out) + ".source-metadata.json").is_file() and not meta.compare(clip_out, clips / "clip1.mp4"),
+          "compose 第一段是 clip(生成视频段):保留它的 AIGC、写说明字段与 sidecar", f"exit={run4.returncode}")
 
     cards = tmp / "compose_cards"
     cards.mkdir()
