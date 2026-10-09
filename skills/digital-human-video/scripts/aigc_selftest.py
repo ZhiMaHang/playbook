@@ -9,7 +9,7 @@
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏、普通(非 mdta)源片的 creation_time;compose.sh 端到端(多段不同元数据、
      /bin/bash 3.2 下的冲突用例);
-  3. verify_package.py:正例 exit 0;不叠角标、角标只在开头/末尾掉了、淡角标、旧角标、画幅不符、
+  3. verify_package.py:正例 exit 0;不叠角标、角标只在开头/中段掉了/末尾掉了、淡角标、旧角标、画幅不符、
      缺说明字段、源键丢失/被改/brand 重复值、--source 传错、缺 --badge-spec、缺 --source 都必须
      FAIL 并点名检查项;--legacy-audit 降为 WARN。
 样本里的 AIGC 键只用假值(example-producer / test-000N),只为验证「原样保留」。
@@ -229,6 +229,9 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     expect_fail("源键丢失", stripped, "源元数据保留", "--badge-spec", spec, "--source", str(src))
     early = overlay(src, png, *_xy(spec), tmp / "neg_badge_early_only.mp4", meta.ffmpeg_args(src, 0), "lt(t,0.5)")
     expect_fail("角标只在开头 0.5 s", early, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
+    middle = overlay(src, png, *_xy(spec), tmp / "neg_badge_gap_middle.mp4", meta.ffmpeg_args(src, 0),
+                     "not(between(t,0.9,2.1))")
+    expect_fail("中段 0.9–2.1 s 掉角标(首末帧都在)", middle, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     late = overlay(src, png, *_xy(spec), tmp / "neg_badge_drops_at_end.mp4", meta.ffmpeg_args(src, 0), "lt(t,2.8)")
     expect_fail("末尾 0.2 s 掉角标", late, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     faint_png = tmp / "faint_badge.png"
