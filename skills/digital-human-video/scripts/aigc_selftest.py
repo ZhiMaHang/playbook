@@ -11,7 +11,7 @@
      封装器键不同的源片;compose.sh 端到端(多段不同元数据、全是图卡、成片再混音、/bin/bash 3.2 下的冲突用例);
      变帧率、头部或头尾 -c copy 剪过、音轨比画面长的正例不误判截断;变帧率慢段掉角标、一帧停留跨过整秒掉角标都要抓到;
   3. verify_package.py:正例 exit 0;不叠角标、角标晚出/只在开头/中段掉了/末尾掉了、淡角标、旧角标、
-     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、画幅不符、
+     几何 JSON 墨迹或字号不足、JSON 自报够但 PNG 实测不够、措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧、画幅不符、
      缺说明字段、源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、
      脱离插件目录找不到 aigc_meta.py 都必须 FAIL 并点名检查项;--legacy-audit 降为 WARN;
      aigc_meta.py check 命令行同样拦得住传错的 --source 和缺说明字段。
@@ -260,8 +260,8 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
     early = overlay(src, png, *_xy(spec), tmp / "neg_badge_early_only.mp4", meta.ffmpeg_args(src, 0), "lt(t,0.5)")
     expect_fail("角标只在开头 0.5 s", early, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     middle = overlay(src, png, *_xy(spec), tmp / "neg_badge_gap_middle.mp4", meta.ffmpeg_args(src, 0),
-                     "not(between(t,0.9,1.1))")
-    expect_fail("中段 0.9–1.1 s 掉角标(只有 1 s 那一帧抽得到)", middle, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
+                     "not(between(t,1.9,2.1))")
+    expect_fail("中段 1.9–2.1 s 掉角标(只有 2 s 那一帧抽得到)", middle, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     late = overlay(src, png, *_xy(spec), tmp / "neg_badge_drops_at_end.mp4", meta.ffmpeg_args(src, 0), "lt(t,2.8)")
     expect_fail("末尾 0.2 s 掉角标", late, "AI 角标像素", "--badge-spec", spec, "--source", str(src))
     faint_png = tmp / "faint_badge.png"
@@ -396,6 +396,14 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
                        "not(between(t,1.07,1.09))")
     expect_fail("变帧率终版一帧从 1.08 s 停到 3 s、只这一帧掉角标", held_fin, "AI 角标像素",
                 "--badge-spec", str(png7) + ".json", "--source", str(held_src), *dims(w7, h7))
+    zeroed = bytearray(fin.read_bytes())
+    at = zeroed.find(b"mdat") - 4
+    end = at + struct.unpack(">I", bytes(zeroed[at:at + 4]))[0]
+    zeroed[at + 8:end] = bytes(end - at - 8)
+    zero_fin = tmp / "neg_payload_zeroed.mp4"
+    zero_fin.write_bytes(bytes(zeroed))
+    expect_fail("结构完整但画面一帧也解不出(mdat 内容清零)", zero_fin, "AI 角标像素", "--badge-spec", spec,
+                "--source", str(src), detail="为零")
     data = fin.read_bytes()
     for label, cut in (("只少最后 1 个字节", len(data) - 1), ("截掉后 60%", len(data) * 4 // 10),
                        ("只剩 moov", data.find(b"mdat") + 4)):
