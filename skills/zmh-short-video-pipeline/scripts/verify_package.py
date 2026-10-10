@@ -306,6 +306,14 @@ def extract_frames(video: Path, duration: float | None, directory: Path, report:
             report.fail("抽帧", result.stderr.strip() or f"{value:.3f}s 抽帧失败")
 
 
+# 完整解码的两条命令都带这两个参数（写在 -i 之前）：
+# -xerror：解码器一报错就非零退出。不带时 ffmpeg 一路打印解码错误却照样退出 0，
+#   要到约三分之二的包都解不出才变非零，只看退出码会把坏了一截的文件判成 PASS。
+# -threads 1：默认多线程解码时，同一处小损坏有时报错、有时被遮过去退出 0，同一个文件判定时过时不过。
+# 解码器不报错的损坏这里查不出，仍靠人工观看与监听。（verify_package_selftest.py 守着这两个参数）
+STRICT_DECODE = ["-xerror", "-threads", "1"]
+
+
 def analyze_loudness(
     video: Path, target: float | None, tolerance: float, report: Report
 ) -> None:
@@ -316,10 +324,12 @@ def analyze_loudness(
             "ffmpeg",
             "-hide_banner",
             "-nostats",
+            *STRICT_DECODE,
             "-i",
             str(video),
             "-filter_complex",
-            "ebur128=peak=true",
+            # framelog=verbose：逐帧读数不进 stderr，失败时报出来的是解码错误而不是几百行读数；Summary 照常输出
+            "ebur128=peak=true:framelog=verbose",
             "-f",
             "null",
             "-",
@@ -342,7 +352,7 @@ def analyze_loudness(
 
 
 def decode_check(video: Path, report: Report) -> None:
-    result = run(["ffmpeg", "-v", "error", "-i", str(video), "-f", "null", "-"])
+    result = run(["ffmpeg", "-v", "error", *STRICT_DECODE, "-i", str(video), "-f", "null", "-"])
     if result.returncode == 0:
         report.passed("完整解码", "ffmpeg 未返回解码错误")
     else:
@@ -364,7 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-lufs", type=float)
     parser.add_argument("--lufs-tolerance", type=float, default=2.0)
     parser.add_argument("--frames-dir", type=Path, help="抽取首/中/末帧到此目录")
-    parser.add_argument("--decode-check", action="store_true", help="完整解码成空输出以检查损坏帧")
+    parser.add_argument("--decode-check", action="store_true", help="完整解码成空输出，解码器报错即 FAIL（不报错的损坏查不出）")
     parser.add_argument("--json-out", type=Path, help="另存机器可读报告")
     return parser
 
