@@ -7,11 +7,12 @@
      end_fade_seconds 是 null,保留锁定口播的两项仍是 true;
   2. verify_package.py 的人工清单(带不带封面两种)里有「无禁用音乐残留」和「新期默认无 BGM」两条;
   3. 已退役的「默认加 BGM」措辞不再出现在本技能的 SKILL.md、references/、assets/、verify_package.py
-     和仓库 README.md 里(改口径时最容易漏的是散在各处的旧句子);扫到不是 UTF-8 文本的文件
-     (如 macOS 在 assets/ 里留下的 .DS_Store)跳过并打印 [SKIP],不抛异常、不因此报失败;
-  4. production.md 写了禁用清单的本地覆盖文件放哪:推荐的 ~/.config 位置写在前,技能目录的后备位置
+     和仓库 README.md 里(改口径时最容易漏的是散在各处的旧句子)。扫到读不成 UTF-8 文本的文件时分两种:
+     不是文档的(如 macOS 在 assets/ 里留下的 .DS_Store、图片、._ 开头的伴生文件)跳过并打印 [SKIP],
+     不抛异常、不因此报失败;该扫的文档(.md/.json/.html/.py)读不出来则报 FAIL,不能没扫就算过;
+  4. production.md 写了禁用清单的本地覆盖文件放哪:标明推荐 ~/.config 位置且写在前,技能目录的后备位置
      落在仓库 .gitignore 的 .local.md 排除规则里(清单里是使用方自己的文件名与校验值,不许进版本库);
-     并写了找不到清单时先问用户、不当成没有禁用曲目。
+     并写了找不到清单时,加音乐、核对旧音轨残留、判断是不是禁用曲目之前都先问用户,不当成没有禁用曲目。
 """
 from __future__ import annotations
 
@@ -81,35 +82,49 @@ def scanned_files() -> list[Path]:
     return [p for p in files + [readme] if p.is_file() and not p.name.endswith(".local.md")]
 
 
-def retired_hits(files: list[Path]) -> list[str]:
-    """返回命中的旧措辞。不是 UTF-8 文本的文件不是文档,跳过,并当场打印一行 [SKIP] 说明跳过了哪个,不静默。"""
+DOCUMENT_SUFFIXES = (".md", ".json", ".html", ".py")
+
+
+def retired_hits(files: list[Path]) -> tuple[list[str], list[str]]:
+    """返回(命中的旧措辞, 读不出来的文档名)。读不成 UTF-8 文本的文件分两种:该扫的文档(后缀在 DOCUMENT_SUFFIXES 里、
+    且不是 . 开头的隐藏或伴生文件)记进第二个返回值,由调用方报 FAIL——没扫就不能算过;其余的不是文档,
+    跳过并当场打印一行 [SKIP] 说明跳过了哪个,不静默。"""
     hits: list[str] = []
+    unreadable: list[str] = []
     for path in files:
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            print(f"[SKIP] {path.name}: 不是 UTF-8 文本,没有扫")
+            if path.suffix.lower() in DOCUMENT_SUFFIXES and not path.name.startswith("."):
+                unreadable.append(path.name)
+            else:
+                print(f"[SKIP] {path.name}: 不是 UTF-8 文本,没有扫")
             continue
         hits += [f"{path.name}:{number} 「{phrase}」" for number, line in enumerate(text.splitlines(), 1)
                  for phrase in RETIRED if phrase in line]
-    return hits
+    return hits, unreadable
 
 
 def binary_file_case() -> None:
-    """assets/ 的临时副本里放一个二进制文件和一份带旧措辞的文本:二进制的跳过并说一声,文本的照样抓到。"""
-    name = "扫描遇到二进制文件:跳过它并打印 [SKIP]、不抛异常,别的文件照扫"
+    """夹具全部在临时目录里现造(不拷真实的 assets/,真实目录里有什么都不影响这一条):三个不是文档的二进制文件、
+    一份存成 UTF-16 的文档、一份干净文本、一份带旧措辞的文本。"""
+    name = "扫描夹具:不是文档的二进制文件跳过并说明跳过了哪个,读不出来的文档记下来,别的文件照扫"
+    binary = b"\x00\x00\x00\x01Bud1\xff\xfe\x80\x81"
     tmp = Path(tempfile.mkdtemp(prefix="pipeline_defaults_selftest_"))
     try:
-        assets = tmp / "assets"
-        shutil.copytree(SKILL / "assets", assets)
-        (assets / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1\xff\xfe\x80\x81")
-        (assets / "zz_planted.md").write_text(f"旧句子:{RETIRED[1]}\n", encoding="utf-8")
+        for skipped_name in (".DS_Store", "preview.png", "._clean.md"):   # 隐藏文件、图片、伴生文件
+            (tmp / skipped_name).write_bytes(binary)
+        (tmp / "wrong_encoding.md").write_bytes(f"旧句子:{RETIRED[1]}\n".encode("utf-16"))
+        (tmp / "clean.md").write_text("没有旧措辞的一行\n", encoding="utf-8")
+        (tmp / "zz_planted.md").write_text(f"旧句子:{RETIRED[1]}\n", encoding="utf-8")
         said = io.StringIO()
         with contextlib.redirect_stdout(said):
-            hits = retired_hits(sorted(p for p in assets.iterdir() if p.is_file()))
-        skip_lines = [line for line in said.getvalue().splitlines() if line.startswith("[SKIP] ")]
-        check(len(skip_lines) == 1 and ".DS_Store" in skip_lines[0] and len(hits) == 1 and "zz_planted.md" in hits[0],
-              name, f"SKIP 行 {skip_lines},命中 {hits}")
+            hits, unreadable = retired_hits(sorted(p for p in tmp.iterdir() if p.is_file()))
+        skipped = sorted(line[len("[SKIP] "):].split(":")[0] for line in said.getvalue().splitlines()
+                         if line.startswith("[SKIP] "))
+        ok = (skipped == sorted([".DS_Store", "preview.png", "._clean.md"]) and unreadable == ["wrong_encoding.md"]
+              and len(hits) == 1 and "zz_planted.md" in hits[0])
+        check(ok, name, "" if ok else f"跳过 {skipped},读不出来 {unreadable},命中 {hits}")
     except Exception as exc:  # noqa: BLE001 - 抛异常也要记成具名 FAIL
         check(False, name, f"{type(exc).__name__}: {exc}"[:200])
     finally:
@@ -127,16 +142,19 @@ def main() -> int:
         missing = [text for text in MANUAL_REQUIRED if not any(text in item for item in items)]
         check(not missing, f"人工清单({label}):有「无禁用音乐残留」「新期默认无 BGM」两条", "缺: " + "、".join(missing) if missing else "")
 
-    hits = retired_hits(scanned_files())
+    hits, unreadable = retired_hits(scanned_files())
+    check(not unreadable, "要扫的文档都读得成 UTF-8 文本(读不出来就没扫,不能算过)", "读不出来: " + "、".join(unreadable) if unreadable else "")
     check(not hits, "已退役的「默认加 BGM」措辞没有再出现", "; ".join(hits[:6]))
     binary_file_case()
 
     production = PRODUCTION.read_text(encoding="utf-8")
     recommended, fallback = f"~/.config/{SKILL.name}/{BLOCKLIST_NAME}", f"references/{BLOCKLIST_NAME}"
-    check(recommended in production and fallback in production and production.index(recommended) < production.index(fallback)
+    check(f"推荐放 `{recommended}`" in production and fallback in production
+          and production.index(recommended) < production.index(fallback)
           and fnmatch.fnmatch(f"skills/{SKILL.name}/{fallback}", GITIGNORE_RULE),
-          "production.md 写了禁用清单放哪:推荐的 ~/.config 位置在前,技能目录的后备位置落在 .local.md 的排除规则里")
-    check("不能当成没有禁用曲目" in production, "production.md 写了找不到清单时先问用户,不当成没有禁用曲目")
+          "production.md 写了禁用清单放哪:标明推荐 ~/.config 位置且写在前,技能目录的后备位置落在 .local.md 的排除规则里")
+    check("不能当成没有禁用曲目：加音乐、核对旧音轨残留、判断某个音源是不是禁用曲目之前，先向用户确认" in production,
+          "production.md 写了找不到清单时不当成没有禁用曲目:加音乐、核对残留、判断是不是禁用曲目之前都先问用户")
     gitignore = REPO / ".gitignore"
     if gitignore.is_file():   # 装成插件后可能没有这个文件,有才核
         check(GITIGNORE_RULE in gitignore.read_text(encoding="utf-8").splitlines(),
