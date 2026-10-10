@@ -11,20 +11,22 @@
      description 冲突护栏(含 Matroska 大写键名)、creation_time(普通源片、mdta 源片「X;X」与「A;B」
      都不让 mvhd 归零、原串是 now、带时区原串逐字保留、不存在的时间不崩溃、MKV 小数秒、真被改仍判变)、
      封装器键不同的源片(含 Matroska 大写键名);compose.sh 端到端(多段不同元数据、首段是 clip、
-     全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例);
+     全是图卡(且清掉旧 sidecar)、成片再混音、/bin/bash 3.2 下的冲突用例、
+     segments.txt 末行不带换行符时最后一段不丢);
   3. verify_package.py:正例 exit 0(含变帧率、头部或头尾 -c copy 剪过、音轨比画面长、mdat 长度未声明时
      只报 WARN、ffmpeg 彩色日志);以下都必须 FAIL 并点名检查项:不叠角标、只有第 0 帧或只有末帧没角标、角标晚出/只在开头/
      中段掉了/末尾掉了、变帧率慢段或一帧停留跨过整秒时掉角标、淡角标、65% 不透明度、左边缘被盖 70 px、插入面板盖住
      部分角标、白闪盖过角标、旧角标、几何 JSON 墨迹或字号不足或字段不合格、JSON 自报够但 PNG 实测不够、
-     措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧、画幅不符、缺说明字段、
+     措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧或后半段内容损坏、画幅不符、缺说明字段、
      源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、脱离插件目录
      找不到 aigc_meta.py;--legacy-audit 降为 WARN;aigc_meta.py check 命令行同样拦得住传错的 --source
-     和缺说明字段;
+     和缺说明字段,用法不对或读不了文件时退出码 2,sidecar 漏写输出路径时不覆盖源片;
   4. verify／aigc_meta 调 ffmpeg、ffprobe 时都断开 stdin(否则 stdin 里的 q 会让它只核前半段)。
 样本里的 AIGC 键只用假值(example-producer / test-000N),只为验证「原样保留」。
 """
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -485,6 +487,15 @@ def section_verify_negatives(tmp: Path, samples: dict) -> None:
                        "not(between(t,1.07,1.09))")
     expect_fail("变帧率终版一帧从 1.08 s 停到 3 s、只这一帧掉角标", held_fin, "AI 角标像素",
                 "--badge-spec", str(png7) + ".json", "--source", str(held_src), *dims(w7, h7))
+    tail = bytearray(tex_fin.read_bytes())
+    at = tail.find(b"mdat") - 4
+    end = at + struct.unpack(">I", bytes(tail[at:at + 4]))[0]
+    cut_from = end - (end - at) * 2 // 5
+    tail[cut_from:end] = bytes(end - cut_from)
+    tail_fin = tmp / "neg_payload_tail_zeroed.mp4"
+    tail_fin.write_bytes(bytes(tail))
+    expect_fail("盒结构完整但内容后 40% 被清零(只解得出前半段)", tail_fin, "AI 角标像素", "--badge-spec", spec,
+                "--source", str(tex), detail="解码出错")
     zeroed = bytearray(fin.read_bytes())
     at = zeroed.find(b"mdat") - 4
     end = at + struct.unpack(">I", bytes(zeroed[at:at + 4]))[0]
@@ -709,7 +720,17 @@ def section_metadata(tmp: Path, samples: dict) -> None:
         check(True, "ffmpeg_args 拒绝负的输入序号")
     missing = subprocess.run([sys.executable, str(HERE / "aigc_meta.py"), "check", str(tmp / "nope.mp4"),
                               "--source", str(src)], capture_output=True, text=True, check=False)
-    check(missing.returncode != 0 and "Traceback" not in missing.stderr, "CLI check 读不了文件时报 FAIL、不抛 traceback")
+    check(missing.returncode == 2 and "Traceback" not in missing.stderr, "CLI check 读不了文件时退出码 2、不抛 traceback")
+    usage = {"check 漏写 --source": meta_cli("check", str(plain_out), str(plain)).returncode,
+             "args 漏写输入序号": meta_cli("args", str(plain)).returncode}
+    check(all(code == 2 for code in usage.values()), "CLI 用法不对时退出码 2(不能被当成通过)", json.dumps(usage, ensure_ascii=False))
+    shot1, shot2 = tmp / "shot1.mp4", tmp / "shot2.mp4"
+    shutil.copyfile(plain, shot1)
+    shutil.copyfile(plain, shot2)
+    before = shot1.read_bytes()
+    forgot = meta_cli("sidecar", str(shot1), str(shot2))
+    check(forgot.returncode == 2 and shot1.read_bytes() == before, "CLI sidecar 漏写输出路径时拒绝执行、不覆盖源片",
+          f"exit={forgot.returncode}")
 
     for label, desc in (("另一句含两要素的说明", "视频由AI生成；人物画面由开源模型生成"),
                         ("我方说明字段后面多了附注", meta.AI_DESCRIPTION + "（附注）")):
@@ -770,6 +791,16 @@ def section_stdin(tmp: Path, samples: dict) -> None:
     leaked = [name for name, stdin in seen if name in ("ffmpeg", "ffprobe") and stdin is not subprocess.DEVNULL]
     check(len(seen) >= 4 and not leaked, "verify／aigc_meta 调 ffmpeg、ffprobe 时都断开 stdin",
           f"{len(seen)} 次调用,没断开的: {leaked}")
+    bare = []   # 上面只走到了几条调用路径;再按语法树把两份文件里每一处 subprocess 调用都查一遍
+    for path in (VERIFY, HERE / "aigc_meta.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess"
+                    and node.func.attr in ("run", "Popen", "call", "check_call", "check_output")):
+                stdin = next((k.value for k in node.keywords if k.arg == "stdin"), None)
+                if not (isinstance(stdin, ast.Attribute) and stdin.attr == "DEVNULL"):
+                    bare.append(f"{path.name}:{node.lineno}")
+    check(not bare, "verify／aigc_meta 里每一处 subprocess 调用都写了 stdin=DEVNULL", "没写的: " + "、".join(bare))
 
 
 def section_compose(tmp: Path) -> None:
@@ -845,6 +876,8 @@ def section_compose(tmp: Path) -> None:
     check(run4.returncode == 0 and ctags.get("AIGC") == SRC_TAGS["AIGC"] and ctags.get("description") == meta.AI_DESCRIPTION
           and Path(str(clip_out) + ".source-metadata.json").is_file() and not meta.compare(clip_out, clips / "clip1.mp4"),
           "compose 第一段是 clip(生成视频段):保留它的 AIGC、写说明字段与 sidecar", f"exit={run4.returncode}")
+    code, report = verify(clip_out, "--badge-spec", str(clips / "_tmp/badge.png.json"), "--source", str(clips / "clip1.mp4"))
+    check(code == 0, "verify 正例·首段是 clip 的 compose 成片(clip 段也叠了角标)", "exit 0" if code == 0 else report[-400:])
 
     cards = tmp / "compose_cards"
     cards.mkdir()
@@ -871,6 +904,27 @@ def section_compose(tmp: Path) -> None:
     check(run2.returncode != 0 and "aigc_meta.py" in run2.stderr and "unbound variable" not in run2.stderr
           and not out2.exists(), "compose 路径 description 冲突:非零退出、护栏报错、不出片",
           f"exit={run2.returncode} 出片={out2.exists()} stderr={run2.stderr.strip()[-160:]}")
+
+    # 末行不带换行符:read 已读到内容却返回非零,compose.sh 两个读 segments.txt 的循环少了
+    # `|| [ -n "${kind:-}" ]` 都会静默漏掉最后一段、照样 exit 0——所以量时长、查 sidecar,不看退出码。
+    # 样本与上面的正例相同,只去掉末尾的换行符;期望值也与正例相同。
+    work5 = tmp / "compose_no_newline"
+    build(work5, SRC_TAGS)
+    seg_file = work5 / "segments.txt"
+    seg_file.write_bytes(seg_file.read_bytes().rstrip(b"\n"))
+    check(not seg_file.read_bytes().endswith(b"\n"), "末行不带换行符用例:segments.txt 末尾确实没有换行符")
+    out5 = tmp / "compose_no_newline.mp4"
+    run5 = subprocess.run([bash, str(HERE / "compose.sh"), str(work5), str(out5)],
+                          capture_output=True, text=True, check=False)
+    if check(run5.returncode == 0 and out5.is_file(), "compose 末行不带换行符:正常出片", run5.stderr.strip()[-400:]):
+        duration5 = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                          str(out5)], capture_output=True, text=True, check=True).stdout)
+        check(abs(duration5 - sum(seg_dur.values())) <= 0.1, "compose 末行不带换行符:成片时长 ≈ 各段之和(最后一段拼进了成片)",
+              f"{duration5:.3f} vs {sum(seg_dur.values()):.3f}")
+        side5 = Path(str(out5) + ".source-metadata.json")
+        data5 = json.loads(side5.read_text(encoding="utf-8")) if side5.is_file() else {"segments": []}
+        ids5 = [json.loads(s["tags"].get("AIGC", "{}")).get("ProduceID") for s in data5["segments"]]
+        check(ids5 == ["test-0001", "test-0002"], "compose 末行不带换行符:sidecar 记下最后一段的 AIGC(预扫没漏)", json.dumps(ids5))
 
 
 def main() -> int:

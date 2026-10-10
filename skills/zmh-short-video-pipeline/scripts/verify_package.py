@@ -436,18 +436,19 @@ def png_ink_height(alpha: bytes, width: int) -> int:
     return rows[-1] - rows[0] + 1 if rows else 0
 
 
-def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tuple[float, bytes]], list[float], int]:
+def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tuple[float, bytes]], list[float], int, int]:
     """只解角标区域，一遍解完：灰度帧写临时文件，showinfo 记下每帧时间戳。
-    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数）。抽样：第 0 帧、以它的时间为起点此后每个整秒时刻
+    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数，ffmpeg 退出码）。-xerror：解码一出错就非零退出，
+    否则盒结构完整、内容坏了一截的文件只核了能解的前半段也会「全程 PASS」。抽样：第 0 帧、以它的时间为起点此后每个整秒时刻
     正在屏上的那一帧（时间戳 ≤ 该时刻的最后一帧；起点为 0 时相当于 fps=1:round=up；变帧率里一帧停留跨过整秒也抽得到）、末帧。
     passthrough：不补帧丢帧，帧和时间戳一一对应。"""
     size = w * h
     with tempfile.TemporaryDirectory() as tmp:
         raw, log = Path(tmp) / "badge.gray", Path(tmp) / "showinfo.log"
         with log.open("wb") as err:
-            subprocess.run(
+            decode = subprocess.run(
                 [
-                    "ffmpeg", "-v", "info", "-nostats", "-i", str(video), "-map", "0:v:0", "-fps_mode", "passthrough",
+                    "ffmpeg", "-v", "info", "-nostats", "-xerror", "-i", str(video), "-map", "0:v:0", "-fps_mode", "passthrough",
                     # 先转灰度再裁:yuv420p 上 crop 会把奇数宽高、坐标按色度对齐取偶,逐帧步长就错位了
                     "-vf", f"format=gray,crop={w}:{h}:{x}:{y},showinfo", "-f", "rawvideo", "-pix_fmt", "gray",
                     "-y", str(raw),
@@ -460,7 +461,7 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tupl
         times = [float(t) for t in SHOWINFO_PTS.findall(ANSI_ESCAPE.sub("", log.read_text("utf-8", "replace")))]
         count = raw.stat().st_size // size if raw.exists() else 0
         if not count or len(times) != count:   # 交给调用方报具名 FAIL,别在下面按下标取时间戳时崩掉
-            return [], times, count
+            return [], times, count, decode.returncode
         picks = [0] if count else []
         second = 1
         while count and times[0] + second <= times[count - 1]:
@@ -476,7 +477,7 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tupl
                 for index in picks:
                     fh.seek(index * size)
                     frames.append((times[index] if index < len(times) else float("nan"), fh.read(size)))
-    return frames, times, count
+    return frames, times, count, decode.returncode
 
 
 BMFF_FIRST_BOXES = {b"ftyp", b"styp", b"moov", b"mdat", b"free", b"skip", b"wide", b"pnot"}
@@ -596,9 +597,12 @@ def check_badge(args: argparse.Namespace, report: Report, meta: Any, strict: boo
         return
     if not checkable:
         report.warn("AI 角标像素", "终版不是 MP4/MOV 盒结构或末尾 box 未声明长度，截断无从核对")
-    picked, times, decoded = badge_frames(args.video.resolve(), x, y, w, h)
+    picked, times, decoded, decode_rc = badge_frames(args.video.resolve(), x, y, w, h)
     if decoded == 0 or decoded != len(times):
         fail("AI 角标像素", f"终版解出 {decoded} 帧、时间戳 {len(times)} 个（为零或对不上：文件损坏，或临时目录写不下）")
+        return
+    if decode_rc != 0:
+        fail("AI 角标像素", f"终版解码出错（ffmpeg 退出码 {decode_rc}，只解出前 {decoded} 帧）：内容可能损坏，后面的画面核不了")
         return
     bad: list[str] = []
     checked = 0

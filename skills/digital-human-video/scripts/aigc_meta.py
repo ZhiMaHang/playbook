@@ -208,6 +208,10 @@ def _main(argv: list[str]) -> int:
             print("[PASS] 源元数据保留、说明字段两要素、brand 三键无重复值")
         return 1 if problems else 0
     if len(argv) >= 3 and argv[0] == "sidecar":
+        target = Path(argv[1])   # 漏写输出路径时第一个参数会是源片:不拦就把源片覆盖成 JSON 了
+        if target.suffix.lower() != ".json" or any(target.resolve() == Path(s).resolve() for s in argv[2:]):
+            print("aigc_meta.py: ⛔ sidecar 的第一个参数是要写出的 .json 路径,不能是源片", file=sys.stderr)
+            return 2
         try:
             differs = write_sidecar(argv[1], argv[2:])
         except RuntimeError as exc:
