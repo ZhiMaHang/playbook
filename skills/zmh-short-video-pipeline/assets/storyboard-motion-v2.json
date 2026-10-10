@@ -66,8 +66,10 @@
     "mute_returned_clip_audio_after_sync_check": true,
     "sfx_enabled": false,
     "sfx_budget": 3,
-    "bgm": "inherit_current_verified_track_and_mix",
-    "end_fade_seconds": 0.6
+    "bgm_enabled": false,
+    "bgm": null,
+    "bgm_rights_evidence": null,
+    "end_fade_seconds": null
   },
   "module_ids": [
     "front_medium",
