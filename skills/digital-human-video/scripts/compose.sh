@@ -21,9 +21,13 @@ python3 "$DIR/render_text.py" badge "$TMP/badge.png"
 i=0; LIST="$TMP/concat.txt"; : > "$LIST"
 # `|| [ -n … ]` 不能省:末行没有换行符时 read 已读到内容却返回非零,少了这一截最后一段会被静默丢掉(compose_selftest.py 守着)
 while read -r kind a b c || [ -n "${kind:-}" ]; do
+  # CRLF 换行的 segments.txt:\r 会粘在每行最后一个字段上(通常是字幕文件名,于是每段字幕都读不到),先去掉
+  kind=${kind%$'\r'}; a=${a%$'\r'}; b=${b%$'\r'}; c=${c%$'\r'}
   [ -z "${kind:-}" ] && continue
   i=$((i+1)); SEG="$TMP/norm_$i.mp4"
-  python3 "$DIR/render_text.py" strip "$TMP/sub_$i.png" "$(cat "$WORK/$c")"
+  # 字幕先赋值再传参:直接写成参数里的 "$(cat …)" 时 cat 失败不触发 set -e,strip 会拿空串画出一条空字幕条,脚本照样退出 0
+  SUB=$(cat "$WORK/$c") || { echo "片段 $i:读不到字幕文件 $WORK/$c(核对 segments.txt 这一行的第 4 列)" >&2; exit 1; }
+  python3 "$DIR/render_text.py" strip "$TMP/sub_$i.png" "$SUB"
   if [ "$kind" = "dh" ]; then
     if [ "$b" = "-" ]; then AUD=(-map 0:a); EXTRA=(); else AUD=(-map 3:a); EXTRA=(-i "$WORK/$b"); fi
     # 数字人的输出画幅**不是固定的**:同一个 omni_v15,有时回 480P 小画幅、
