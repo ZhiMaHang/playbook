@@ -85,30 +85,32 @@ def scanned_files() -> list[Path]:
 DOCUMENT_SUFFIXES = (".md", ".json", ".html", ".py")
 
 
-def retired_hits(files: list[Path]) -> tuple[list[str], list[str]]:
-    """返回(命中的旧措辞, 读不出来的文档名)。读不成 UTF-8 文本的文件分两种:该扫的文档(后缀在 DOCUMENT_SUFFIXES 里、
-    且不是 . 开头的隐藏或伴生文件)记进第二个返回值,由调用方报 FAIL——没扫就不能算过;其余的不是文档,
-    跳过并当场打印一行 [SKIP] 说明跳过了哪个,不静默。"""
+UNREADABLE = "读不成 UTF-8 文本,没扫到"
+
+
+def retired_hits(files: list[Path]) -> list[str]:
+    """返回要报出来的问题:命中的旧措辞,加上读不出来的文档。读不成 UTF-8 文本的文件分两种:该扫的文档
+    (后缀在 DOCUMENT_SUFFIXES 里、且不是 . 开头的隐藏或伴生文件)也记进返回值——没扫就不能算过;
+    其余的不是文档,跳过并当场打印一行 [SKIP] 说明跳过了哪个,不静默。"""
     hits: list[str] = []
-    unreadable: list[str] = []
     for path in files:
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             if path.suffix.lower() in DOCUMENT_SUFFIXES and not path.name.startswith("."):
-                unreadable.append(path.name)
+                hits.append(f"{path.name}: {UNREADABLE}")
             else:
                 print(f"[SKIP] {path.name}: 不是 UTF-8 文本,没有扫")
             continue
         hits += [f"{path.name}:{number} 「{phrase}」" for number, line in enumerate(text.splitlines(), 1)
                  for phrase in RETIRED if phrase in line]
-    return hits, unreadable
+    return hits
 
 
 def binary_file_case() -> None:
     """夹具全部在临时目录里现造(不拷真实的 assets/,真实目录里有什么都不影响这一条):三个不是文档的二进制文件、
     一份存成 UTF-16 的文档、一份干净文本、一份带旧措辞的文本。"""
-    name = "扫描夹具:不是文档的二进制文件跳过并说明跳过了哪个,读不出来的文档记下来,别的文件照扫"
+    name = "扫描夹具:不是文档的二进制文件跳过并说明跳过了哪个,读不出来的文档报出来,别的文件照扫"
     binary = b"\x00\x00\x00\x01Bud1\xff\xfe\x80\x81"
     tmp = Path(tempfile.mkdtemp(prefix="pipeline_defaults_selftest_"))
     try:
@@ -119,12 +121,12 @@ def binary_file_case() -> None:
         (tmp / "zz_planted.md").write_text(f"旧句子:{RETIRED[1]}\n", encoding="utf-8")
         said = io.StringIO()
         with contextlib.redirect_stdout(said):
-            hits, unreadable = retired_hits(sorted(p for p in tmp.iterdir() if p.is_file()))
+            hits = retired_hits(sorted(p for p in tmp.iterdir() if p.is_file()))
         skipped = sorted(line[len("[SKIP] "):].split(":")[0] for line in said.getvalue().splitlines()
                          if line.startswith("[SKIP] "))
-        ok = (skipped == sorted([".DS_Store", "preview.png", "._clean.md"]) and unreadable == ["wrong_encoding.md"]
-              and len(hits) == 1 and "zz_planted.md" in hits[0])
-        check(ok, name, "" if ok else f"跳过 {skipped},读不出来 {unreadable},命中 {hits}")
+        ok = (skipped == sorted([".DS_Store", "preview.png", "._clean.md"])
+              and sorted(hits) == sorted([f"wrong_encoding.md: {UNREADABLE}", f"zz_planted.md:1 「{RETIRED[1]}」"]))
+        check(ok, name, "" if ok else f"跳过 {skipped},报出 {hits}")
     except Exception as exc:  # noqa: BLE001 - 抛异常也要记成具名 FAIL
         check(False, name, f"{type(exc).__name__}: {exc}"[:200])
     finally:
@@ -142,9 +144,8 @@ def main() -> int:
         missing = [text for text in MANUAL_REQUIRED if not any(text in item for item in items)]
         check(not missing, f"人工清单({label}):有「无禁用音乐残留」「新期默认无 BGM」两条", "缺: " + "、".join(missing) if missing else "")
 
-    hits, unreadable = retired_hits(scanned_files())
-    check(not unreadable, "要扫的文档都读得成 UTF-8 文本(读不出来就没扫,不能算过)", "读不出来: " + "、".join(unreadable) if unreadable else "")
-    check(not hits, "已退役的「默认加 BGM」措辞没有再出现", "; ".join(hits[:6]))
+    hits = retired_hits(scanned_files())
+    check(not hits, "已退役的「默认加 BGM」措辞没有再出现,要扫的文档都读得出来", "; ".join(hits[:6]))
     binary_file_case()
 
     production = PRODUCTION.read_text(encoding="utf-8")
