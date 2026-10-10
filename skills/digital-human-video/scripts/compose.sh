@@ -27,7 +27,7 @@ BX=${BXY% *}; BY=${BXY#* }
 # ⚠️ 不要改成 `done < <(python3 …)`:进程替换的失败不触发 set -e,护栏会被吞掉;bash 3.2 也没有 mapfile。
 SRCS=()
 # 两个读 segments.txt 的循环都带 `|| [ -n … ]`,不能省:末行没有换行符时 read 已读到内容却返回非零,
-# 少了这一截最后一段会被静默漏掉(这里漏记源片,下面漏拼进成片;aigc_selftest.py 2b 守着)
+# 少了这一截最后一段会被静默漏掉(这里漏记源片,下面漏拼进成片;aigc_selftest.py 2b 与 compose_selftest.py 守着)
 while read -r kind a _ || [ -n "${kind:-}" ]; do
   case "${kind:-}" in dh|clip) SRCS+=("$WORK/$a") ;; esac
 done < "$WORK/segments.txt"
