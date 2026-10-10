@@ -74,8 +74,10 @@ def zero_tail(src: Path, dst: Path, stream: str) -> tuple[int, int]:
 
 def verify(video: Path, *flags: str) -> tuple[int, dict[str, list[str]]]:
     """跑 verify_package.py,返回(退出码, {检查名: [级别, …]})。"""
+    # --legacy-audit:样本没有角标和源片。不带它时「缺 --badge-spec／--source」本身就让完好样本退出 1,
+    # 下面「损坏样本必须退出 1」就成了空断言。
     result = sh(sys.executable, str(VERIFY), "--video", str(video),
-                "--expected-width", str(WIDTH), "--expected-height", str(HEIGHT), *flags)
+                "--expected-width", str(WIDTH), "--expected-height", str(HEIGHT), "--legacy-audit", *flags)
     levels: dict[str, list[str]] = {}
     for line in result.stdout.splitlines():
         for level in ("PASS", "WARN", "FAIL"):
