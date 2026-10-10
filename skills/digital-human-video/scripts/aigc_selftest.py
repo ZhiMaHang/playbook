@@ -967,7 +967,7 @@ def main() -> int:
                           ("2. 元数据", lambda: section_metadata(tmp, samples)),
                           ("2b. compose.sh", lambda: section_compose(tmp)),
                           ("3. verify 反例", lambda: section_verify_negatives(tmp, samples)),
-                          ("4. 子进程 stdin", lambda: section_stdin(tmp, samples))):
+                          ("4. 子进程调用方式", lambda: section_stdin(tmp, samples))):
             try:
                 run()
             except Exception as exc:  # noqa: BLE001 - 一节抛异常也要记成具名 FAIL,别的节照跑
