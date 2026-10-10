@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from datetime import datetime, timedelta, timezone
 import re
 import subprocess
@@ -179,6 +180,14 @@ def write_sidecar(out_json: str | Path, sources: list[str | Path]) -> bool:
     return differs
 
 
+def _same_file(a: str | Path, b: str | Path) -> bool:
+    """是不是同一个文件:硬链接、大小写不敏感的文件系统上换了大小写的写法也算;有一方不存在时退回比路径。"""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return Path(a).resolve() == Path(b).resolve()
+
+
 def _main(argv: list[str]) -> int:
     if len(argv) >= 2 and argv[0] == "args":
         try:
@@ -209,12 +218,12 @@ def _main(argv: list[str]) -> int:
         return 1 if problems else 0
     if len(argv) >= 3 and argv[0] == "sidecar":
         target = Path(argv[1])   # 漏写输出路径时第一个参数会是源片:不拦就把源片覆盖成 JSON 了
-        if target.suffix.lower() != ".json" or any(target.resolve() == Path(s).resolve() for s in argv[2:]):
+        if target.suffix.lower() != ".json" or any(_same_file(target, s) for s in argv[2:]):
             print("aigc_meta.py: ⛔ sidecar 的第一个参数是要写出的 .json 路径,不能是源片", file=sys.stderr)
             return 2
         try:
             differs = write_sidecar(argv[1], argv[2:])
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:   # OSError:输出目录不存在、没有写权限
             print(f"aigc_meta.py: ⛔ {exc}", file=sys.stderr)
             return 2
         if differs:

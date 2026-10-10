@@ -5,7 +5,7 @@
 改 render_text.badge()、aigc_meta.py、compose.sh 的角标/元数据部分,或 verify_package.py 的
 角标/元数据检查之后,都跑这一条。覆盖:
   1. 角标:1080x1920、1920x1080、1440x2560(抓写死字号)、720x1280 四种画幅解码第 0 帧、
-     1 s、2 s、末帧实测字形高、字高下限正好 5%、1080x1920 几何不漂;位置贴角;深浅两种底色过
+     1 s、2 s、末帧实测字形高、字高下限正好 5%、1080x1920 几何不漂;位置贴角(函数与命令行的 anchor 参数);深浅两种底色过
      verify_package 的像素判据;另有 432x768／360x640／540x960／610x1084 小画幅的 verify 正反例;
   2. 元数据:源片键逐字保留(含非标准键)、说明字段、两要素判定、隐私提示(workflow／prompt 含 Matroska 大写键名、本机路径,不误报网址)、brand 三键无重复值、源片在第 0/1 路、
      description 冲突护栏(含 Matroska 大写键名)、creation_time(普通源片、mdta 源片「X;X」与「A;B」
@@ -20,8 +20,10 @@
      措辞缺一要素、终版被截断(恰好少 2 帧、只少最后 1 个字节等)、结构完整但解不出帧或后半段内容损坏、画幅不符、缺说明字段、
      源键丢失/被改/brand 重复值、--source 传错/不存在/读不了、缺 --badge-spec、缺 --source、脱离插件目录
      找不到 aigc_meta.py;--legacy-audit 降为 WARN;aigc_meta.py check 命令行同样拦得住传错的 --source
-     和缺说明字段,用法不对或读不了文件时退出码 2,sidecar 漏写输出路径时不覆盖源片;
-  4. verify／aigc_meta 调 ffmpeg、ffprobe 时都断开 stdin(否则 stdin 里的 q 会让它只核前半段)。
+     和缺说明字段,用法不对、读不了文件或写不了输出时退出码 2,sidecar 漏写输出路径或输出路径就是源片
+     (同名、硬链接)时不覆盖源片;
+  4. verify／aigc_meta 调 ffmpeg、ffprobe 时都断开 stdin(否则 stdin 里的 q 会让它只核前半段);
+     verify 解角标区域时单线程解码(多线程下同一处损坏有时报错有时不报,判定会随运行变)。
 样本里的 AIGC 键只用假值(example-producer / test-000N),只为验证「原样保留」。
 """
 from __future__ import annotations
@@ -271,6 +273,11 @@ def section_badge(tmp: Path) -> dict:
         right, bottom = 1080 - s["x"] - s["w"], 1920 - s["y"] - s["h"]
         ok = (left if anchor[1] == "l" else right) == 40 and (top if anchor[0] == "t" else bottom) == 60
         check(ok, f"anchor={anchor} 贴角(边距 40,60)", f"({left},{top}) 右 {right} 下 {bottom}")
+        cli = subprocess.run([sys.executable, str(HERE / "render_text.py"), "badge", str(tmp / f"cli_{anchor}.png"),
+                              "1080", "1920", anchor], capture_output=True, text=True, check=False)
+        got = json.loads(cli.stdout) if cli.returncode == 0 else {}
+        check([got.get(k) for k in ("anchor", "x", "y")] == [anchor, s["x"], s["y"]],
+              f"命令行 badge … {anchor} 与函数调用落在同一位置", f"exit={cli.returncode} {got.get('anchor')} ({got.get('x')},{got.get('y')})")
 
     # 反例:旧角标的字形实测确实过不了线,量法本身能抓出来
     old_png = tmp / "old_badge.png"
@@ -731,6 +738,19 @@ def section_metadata(tmp: Path, samples: dict) -> None:
     forgot = meta_cli("sidecar", str(shot1), str(shot2))
     check(forgot.returncode == 2 and shot1.read_bytes() == before, "CLI sidecar 漏写输出路径时拒绝执行、不覆盖源片",
           f"exit={forgot.returncode}")
+    named_json = tmp / "shot_named.json"   # 内容是视频、名字却以 .json 结尾的源片:后缀那一关拦不住,要靠「不能是源片」
+    shutil.copyfile(plain, named_json)
+    same = meta_cli("sidecar", str(named_json), str(named_json))
+    check(same.returncode == 2 and named_json.read_bytes() == before, "CLI sidecar 输出路径就是源片时拒绝执行、不覆盖源片",
+          f"exit={same.returncode}")
+    alias = tmp / "shot_alias.json"
+    os.link(named_json, alias)
+    linked = meta_cli("sidecar", str(alias), str(named_json))
+    check(linked.returncode == 2 and named_json.read_bytes() == before, "CLI sidecar 输出路径是源片的硬链接时拒绝执行、不覆盖源片",
+          f"exit={linked.returncode}")
+    nodir = meta_cli("sidecar", str(tmp / "no_such_dir" / "out.json"), str(shot2))
+    check(nodir.returncode == 2 and "Traceback" not in nodir.stderr, "CLI sidecar 输出目录不存在时退出码 2、不抛 traceback",
+          f"exit={nodir.returncode}")
 
     for label, desc in (("另一句含两要素的说明", "视频由AI生成；人物画面由开源模型生成"),
                         ("我方说明字段后面多了附注", meta.AI_DESCRIPTION + "（附注）")):
@@ -765,19 +785,20 @@ def section_metadata(tmp: Path, samples: dict) -> None:
 def section_stdin(tmp: Path, samples: dict) -> None:
     """verify／aigc_meta 调 ffmpeg、ffprobe 时 stdin 必须断开:ffmpeg 会把 stdin 当键盘指令(q 提前收工却退出 0,
     只核了前半段就判 PASS),批量 `while read` 时还会吃掉循环的输入。读不读 stdin 取决于解码快慢,行为测不稳,
-    这里直接看每次调子进程时传没传 stdin=DEVNULL。"""
-    print("\n== 4. 子进程 stdin ==")
+    这里直接看每次调子进程时传没传 stdin=DEVNULL。解角标区域时的单线程解码同理:多线程下同一处损坏报不报错
+    是竞态,行为测不稳,也按调用参数查。"""
+    print("\n== 4. 子进程调用方式 ==")
     spec_v = importlib.util.spec_from_file_location("verify_package_under_test", VERIFY)
     vp = importlib.util.module_from_spec(spec_v)
     sys.modules[spec_v.name] = vp
     spec_v.loader.exec_module(vp)
     src, fin, png = samples[(1080, 1920, DARK)]
     spec = json.loads(Path(str(png) + ".json").read_text(encoding="utf-8"))
-    seen: list[tuple[str, object]] = []
+    seen: list[tuple[str, object, list[str]]] = []
     real_run = subprocess.run
 
     def spy(cmd, *args, **kwargs):
-        seen.append((Path(str(cmd[0])).name, kwargs.get("stdin")))
+        seen.append((Path(str(cmd[0])).name, kwargs.get("stdin"), [str(part) for part in cmd]))
         return real_run(cmd, *args, **kwargs)
 
     subprocess.run = spy
@@ -788,9 +809,14 @@ def section_stdin(tmp: Path, samples: dict) -> None:
         meta.format_tags(fin)
     finally:
         subprocess.run = real_run
-    leaked = [name for name, stdin in seen if name in ("ffmpeg", "ffprobe") and stdin is not subprocess.DEVNULL]
+    leaked = [name for name, stdin, _ in seen if name in ("ffmpeg", "ffprobe") and stdin is not subprocess.DEVNULL]
     check(len(seen) >= 4 and not leaked, "verify／aigc_meta 调 ffmpeg、ffprobe 时都断开 stdin",
           f"{len(seen)} 次调用,没断开的: {leaked}")
+    decodes = [cmd for name, _, cmd in seen if name == "ffmpeg" and "-xerror" in cmd]
+    single = [cmd for cmd in decodes if "-threads" in cmd and cmd.index("-threads") < cmd.index("-i")
+              and cmd[cmd.index("-threads") + 1] == "1"]
+    check(len(decodes) == 1 and single == decodes, "verify 解角标区域时单线程解码(-threads 1 写在 -i 之前)",
+          f"带 -xerror 的解码调用 {len(decodes)} 次,其中单线程 {len(single)} 次")
     bare = []   # 上面只走到了几条调用路径;再按语法树把两份文件里每一处 subprocess 调用都查一遍
     for path in (VERIFY, HERE / "aigc_meta.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

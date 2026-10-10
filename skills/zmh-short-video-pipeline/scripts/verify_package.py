@@ -438,8 +438,10 @@ def png_ink_height(alpha: bytes, width: int) -> int:
 
 def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tuple[float, bytes]], list[float], int, int]:
     """只解角标区域，一遍解完：灰度帧写临时文件，showinfo 记下每帧时间戳。
-    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数，ffmpeg 退出码）。-xerror：解码一出错就非零退出，
-    否则盒结构完整、内容坏了一截的文件只核了能解的前半段也会「全程 PASS」。抽样：第 0 帧、以它的时间为起点此后每个整秒时刻
+    返回（抽样帧 [(时间, 灰度帧)]，全部帧的时间戳，写出的帧数，ffmpeg 退出码）。-xerror：解码器一报错就非零退出，
+    否则盒结构完整、内容坏了一截的文件只核了能解的前半段也会「全程 PASS」。-threads 1：多线程解码时同一处损坏
+    有时报错、有时只是被悄悄补上（退出码 0），同一个文件的判定会随运行变；单线程下每次结果相同。
+    解码器自己没报错的损坏（有些坏了的码流照样解得出画面）这里查不出。抽样：第 0 帧、以它的时间为起点此后每个整秒时刻
     正在屏上的那一帧（时间戳 ≤ 该时刻的最后一帧；起点为 0 时相当于 fps=1:round=up；变帧率里一帧停留跨过整秒也抽得到）、末帧。
     passthrough：不补帧丢帧，帧和时间戳一一对应。"""
     size = w * h
@@ -448,7 +450,7 @@ def badge_frames(video: Path, x: int, y: int, w: int, h: int) -> tuple[list[tupl
         with log.open("wb") as err:
             decode = subprocess.run(
                 [
-                    "ffmpeg", "-v", "info", "-nostats", "-xerror", "-i", str(video), "-map", "0:v:0", "-fps_mode", "passthrough",
+                    "ffmpeg", "-v", "info", "-nostats", "-xerror", "-threads", "1", "-i", str(video), "-map", "0:v:0", "-fps_mode", "passthrough",
                     # 先转灰度再裁:yuv420p 上 crop 会把奇数宽高、坐标按色度对齐取偶,逐帧步长就错位了
                     "-vf", f"format=gray,crop={w}:{h}:{x}:{y},showinfo", "-f", "rawvideo", "-pix_fmt", "gray",
                     "-y", str(raw),
