@@ -15,8 +15,10 @@
 """
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import importlib.util
+import io
 import json
 import shutil
 import sys
@@ -79,33 +81,35 @@ def scanned_files() -> list[Path]:
     return [p for p in files + [readme] if p.is_file() and not p.name.endswith(".local.md")]
 
 
-def retired_hits(files: list[Path]) -> tuple[list[str], list[str]]:
-    """返回(命中的旧措辞, 跳过的文件名)。不是 UTF-8 文本的文件不是文档,跳过;跳过了哪个由调用方打印出来,不静默。"""
+def retired_hits(files: list[Path]) -> list[str]:
+    """返回命中的旧措辞。不是 UTF-8 文本的文件不是文档,跳过,并当场打印一行 [SKIP] 说明跳过了哪个,不静默。"""
     hits: list[str] = []
-    skipped: list[str] = []
     for path in files:
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            skipped.append(path.name)
+            print(f"[SKIP] {path.name}: 不是 UTF-8 文本,没有扫")
             continue
         hits += [f"{path.name}:{number} 「{phrase}」" for number, line in enumerate(text.splitlines(), 1)
                  for phrase in RETIRED if phrase in line]
-    return hits, skipped
+    return hits
 
 
 def binary_file_case() -> None:
-    """assets/ 的临时副本里放一个二进制文件和一份带旧措辞的文本:二进制的跳过,文本的照样抓到。"""
-    name = "扫描遇到二进制文件:跳过它、不抛异常,别的文件照扫"
+    """assets/ 的临时副本里放一个二进制文件和一份带旧措辞的文本:二进制的跳过并说一声,文本的照样抓到。"""
+    name = "扫描遇到二进制文件:跳过它并打印 [SKIP]、不抛异常,别的文件照扫"
     tmp = Path(tempfile.mkdtemp(prefix="pipeline_defaults_selftest_"))
     try:
         assets = tmp / "assets"
         shutil.copytree(SKILL / "assets", assets)
         (assets / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1\xff\xfe\x80\x81")
         (assets / "zz_planted.md").write_text(f"旧句子:{RETIRED[1]}\n", encoding="utf-8")
-        hits, skipped = retired_hits(sorted(p for p in assets.iterdir() if p.is_file()))
-        check(skipped == [".DS_Store"] and len(hits) == 1 and "zz_planted.md" in hits[0], name,
-              f"跳过 {skipped},命中 {hits}")
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said):
+            hits = retired_hits(sorted(p for p in assets.iterdir() if p.is_file()))
+        skip_lines = [line for line in said.getvalue().splitlines() if line.startswith("[SKIP] ")]
+        check(len(skip_lines) == 1 and ".DS_Store" in skip_lines[0] and len(hits) == 1 and "zz_planted.md" in hits[0],
+              name, f"SKIP 行 {skip_lines},命中 {hits}")
     except Exception as exc:  # noqa: BLE001 - 抛异常也要记成具名 FAIL
         check(False, name, f"{type(exc).__name__}: {exc}"[:200])
     finally:
@@ -123,9 +127,7 @@ def main() -> int:
         missing = [text for text in MANUAL_REQUIRED if not any(text in item for item in items)]
         check(not missing, f"人工清单({label}):有「无禁用音乐残留」「新期默认无 BGM」两条", "缺: " + "、".join(missing) if missing else "")
 
-    hits, skipped = retired_hits(scanned_files())
-    for skipped_name in skipped:
-        print(f"[SKIP] {skipped_name}: 不是 UTF-8 文本,没有扫")
+    hits = retired_hits(scanned_files())
     check(not hits, "已退役的「默认加 BGM」措辞没有再出现", "; ".join(hits[:6]))
     binary_file_case()
 
