@@ -19,7 +19,8 @@ WORK="$1"; OUT="$2"; TMP="$WORK/_tmp"; mkdir -p "$TMP"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 python3 "$DIR/render_text.py" badge "$TMP/badge.png"
 i=0; LIST="$TMP/concat.txt"; : > "$LIST"
-while read -r kind a b c; do
+# `|| [ -n … ]` 不能省:末行没有换行符时 read 已读到内容却返回非零,少了这一截最后一段会被静默丢掉(compose_selftest.py 守着)
+while read -r kind a b c || [ -n "${kind:-}" ]; do
   [ -z "${kind:-}" ] && continue
   i=$((i+1)); SEG="$TMP/norm_$i.mp4"
   python3 "$DIR/render_text.py" strip "$TMP/sub_$i.png" "$(cat "$WORK/$c")"
