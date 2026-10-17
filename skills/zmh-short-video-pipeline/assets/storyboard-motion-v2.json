@@ -103,7 +103,7 @@
     "sfx": []
   },
   "shots": [],
-  "usage": "Use relative package paths. Populate measured values and per-shot image/audio pairs before presenter handoff. Half-open master WAV sample ranges in shots must partition the full narration exactly once; shots remain the complete presenter track. Populate actual returned video intervals and sync QA before editing. Each episode requires at least one user-provided screenshot, screen_recording, or diagram and a corresponding semantic visual insert; any one type is sufficient, not all three. Record these separately in visual_assets and visual_inserts, never as ComfyUI presenter shots. Insert timeline intervals must lie within the existing master narration timeline and must not extend it; narration continues and recording audio is muted by default. Use source_in_seconds/source_out_seconds only for recordings; keep them null for still images. A missing visual asset does not block audio or presenter handoff, but final_package_ready must remain false until asset and insert QA pass or the user explicitly waives the requirement for this episode and waiver_record is populated. Null measured values and empty shots mean incomplete presenter handoff; conditional fields may remain null when not applicable. See references/storyboard-motion.md.",
+  "usage": "Use relative package paths. Populate measured values and per-shot image/audio pairs before presenter handoff. Half-open master WAV sample ranges in shots must partition the full narration exactly once; shots remain the complete presenter track. Populate actual returned video intervals and sync QA before editing. Each episode requires at least one user-provided screenshot, screen_recording, or diagram and a corresponding semantic visual insert; any one type is sufficient, not all three. Record these separately in visual_assets and visual_inserts, never as ComfyUI presenter shots. Insert timeline intervals must lie within the existing master narration timeline and must not extend it; narration continues and recording audio is muted by default. Use source_in_seconds/source_out_seconds only for recordings; keep them null for still images. A missing visual asset does not block audio or presenter handoff, but final_package_ready must remain false until asset and insert QA pass or the user explicitly waives the requirement for this episode and waiver_record is populated. Null measured values and empty shots mean incomplete presenter handoff; conditional fields may remain null when not applicable. In visual_asset_entry_template, provided_by is one of user, self_made, official_download or captured_third_party; for third-party material record source_url, publisher, sha256, the consent record and the rights record (usage_scope, rights_basis), and use \"pending\" (待确认 in the ledger) when the user has not confirmed a rights basis. The live-footage and cards route (no presenter) is defined in references/storyboard-motion.md section 7; there the presenter-only fields do not apply, official_download, captured_third_party and self_made assets satisfy visual_asset_requirement, official clips use type official_clip, screenshots (including official images) use screenshot and cards use diagram; captured_third_party assets keep download_consent_record null. See references/storyboard-motion.md.",
   "visual_asset_requirement": {
     "minimum_user_assets": 1,
     "accepted_types": [
@@ -150,9 +150,18 @@
   "visual_asset_entry_template": {
     "id": null,
     "type": null,
-    "provided_by": "user",
+    "provided_by": null,
     "file_path": null,
     "source_record_path": null,
+    "source_url": null,
+    "publisher": null,
+    "source_label": null,
+    "sha256": null,
+    "source_ranges_used": [],
+    "download_consent_record": null,
+    "usage_scope": null,
+    "rights_basis": null,
+    "rights_record_path": null,
     "content_summary": null,
     "narration_cue_ids": [],
     "duration_seconds": null,

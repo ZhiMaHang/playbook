@@ -92,7 +92,8 @@ def format_tags(path: str | Path) -> dict[str, str]:
 def ffmpeg_args(source_path: str | Path | None, input_index: int | None) -> list[str]:
     """成片编码时追加的元数据参数。source_path 是源片,input_index 是它在本条 ffmpeg 命令里的输入序号
     (必须显式给:不写时 ffmpeg 取第 0 路,源片不在第 0 路就整套丢光)。
-    source_path 为 None 表示没有源片(全是图卡),只写说明字段、清 brand 三键,不映射元数据。
+    source_path 为 None 表示没有源片(全是图卡),只写说明字段、清 brand 三键,不加 -map_metadata;
+    ffmpeg 不写 -map_metadata 时默认会拷第 0 路的全局元数据,第 0 路是图卡、lavfi 这类不带元数据的输入时才等于不映射。
     带 use_metadata_tags 才能保住非标准键(如服务商的 AIGC);它会把 brand 三键写成「isom;isom」重复值,所以显式清掉。"""
     if source_path is None:
         mapping: list[str] = []

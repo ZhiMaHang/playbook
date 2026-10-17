@@ -1,7 +1,7 @@
 {
   "name": "playbook",
-  "version": "0.11.0",
-  "description": "智码航工具集,全程零猜测。提示词三件套——prompt-optimizer:消歧→两道选择题→纯拼接,把一句模糊的话理成可直接发送的提示词;five-sentence-brief:按五句话把一件要办的事补全成任务简报;four-part-prompt:按目标/背景/输出要求/边界约束四段补全成结构化提示词。视频——digital-human-video:确认后调用火山·即梦AI 产出口播视频;digital-human-video-init:配置密钥并零成本验证;zmh-short-video-pipeline:按文案确认与音频、成片发布包、三平台发布完成三步主流程,评论仅在明确要求时追加,视频号由用户发布,YouTube Shorts 使用独立 9:16 图片。营销——marketing:按 SEO/GEO/SEM 清单对营销站线上与源码双向核对,代码层能改的直接改,其余产出人工待办。",
+  "version": "0.12.0",
+  "description": "智码航工具集,全程零猜测。提示词三件套——prompt-optimizer:消歧→两道选择题→纯拼接,把一句模糊的话理成可直接发送的提示词;five-sentence-brief:按五句话把一件要办的事补全成任务简报;four-part-prompt:按目标/背景/输出要求/边界约束四段补全成结构化提示词。视频——digital-human-video:确认后调用火山·即梦AI 产出口播视频;digital-human-video-init:配置密钥并零成本验证;zmh-short-video-pipeline:按文案确认与音频、成片发布包、三平台发布完成三步主流程,画面优先用可溯源的实际画面,可按参考样片走实拍素材＋图卡路线,评论仅在明确要求时追加,视频号由用户发布,YouTube Shorts 使用独立 9:16 图片。营销——marketing:按 SEO/GEO/SEM 清单对营销站线上与源码双向核对,代码层能改的直接改,其余产出人工待办。",
   "author": {
     "name": "ZhiMaHang"
   },
