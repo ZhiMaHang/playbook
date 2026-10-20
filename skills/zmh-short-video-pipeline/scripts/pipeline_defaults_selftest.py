@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""短视频流程「新期默认不加 BGM」口径的自测:只读模板、人工清单与文档,不调 ffmpeg;除一个用完即删的临时目录外不写任何文件。
+"""短视频流程默认口径的自测(新期默认不加 BGM、第三步站外登记):只读模板、人工清单与文档,不调 ffmpeg;除一个用完即删的临时目录外不写任何文件。
 用法: python3 pipeline_defaults_selftest.py     # 全过打印 PIPELINE_DEFAULTS_SELFTEST_PASS,否则非零退出
 
-改分镜参数模板的音频默认值、verify_package.py 的人工清单,或文档里讲 BGM 的句子之后跑这一条。覆盖:
+改分镜参数模板的音频默认值、verify_package.py 的人工清单,或文档里讲 BGM、站外登记的句子之后跑这一条。覆盖:
   1. assets/storyboard-motion-v2.json 的 audio_defaults:bgm_enabled 是 false,bgm、bgm_rights_evidence、
      end_fade_seconds 是 null,保留锁定口播的两项仍是 true;
   2. verify_package.py 的人工清单(带不带封面两种)里有「无禁用音乐残留」和「新期默认无 BGM」两条;
@@ -12,7 +12,10 @@
      不抛异常、不因此报失败;该扫的文档(.md/.json/.html/.py)读不出来则报 FAIL,不能没扫就算过;
   4. production.md 写了禁用清单的本地覆盖文件放哪:标明推荐 ~/.config 位置且写在前,技能目录的后备位置
      落在仓库 .gitignore 的 .local.md 排除规则里(清单里是使用方自己的文件名与校验值,不许进版本库);
-     并写了找不到清单时,加音乐、核对旧音轨残留、判断是不是禁用曲目之前都先问用户,不当成没有禁用曲目。
+     并写了找不到清单时,加音乐、核对旧音轨残留、判断是不是禁用曲目之前都先问用户,不当成没有禁用曲目;
+  5. 第三步站外登记:work-ledger.md 写了登记配置的本地覆盖文件放哪(同第 4 条的推荐位置在前、后备落在排除规则里)、
+     没有配置就跳过并在最终回复里说明;SKILL.md 第三步的步骤与报告、work-ledger.md 交付清单的第三步都有这一项
+     (登哪几张表、怎么写是使用方的约定,只在本地覆盖文件里,本仓不出现)。
 """
 from __future__ import annotations
 
@@ -34,12 +37,15 @@ REPO = SKILL.parents[1]
 VERIFY = HERE / "verify_package.py"
 TEMPLATE = SKILL / "assets/storyboard-motion-v2.json"
 PRODUCTION = SKILL / "references/production.md"
+WORK_LEDGER = SKILL / "references/work-ledger.md"
 
 # 期望值独立写死,不从被测文件里反推
 AUDIO_DEFAULTS = {"bgm_enabled": False, "bgm": None, "bgm_rights_evidence": None, "end_fade_seconds": None,
                   "preserve_locked_voice": True, "use_master_narration": True}
 MANUAL_REQUIRED = ("无禁用音乐残留", "新期默认无 BGM")
 BLOCKLIST_NAME = "bgm-blocklist.local.md"
+REGISTRY_NAME = "offsite-registry.local.md"
+REGISTRY_SKIPPED = "本机未配置站外登记，已跳过"
 GITIGNORE_RULE = "skills/*/references/*.local.md"
 # 已退役措辞登记:旧口径「默认加 BGM」留下的句子,任何一条重新出现都算口径漂回去了
 RETIRED = (
@@ -63,6 +69,12 @@ def check(ok: bool, name: str, detail: str = "") -> bool:
     if not ok:
         FAILURES.append(name)
     return ok
+
+
+def between(text: str, start: str, end: str) -> str:
+    """取 start 与其后第一个 end 之间的文字;任一锚点找不到就抛异常,不让窗口静默撑到全文。"""
+    at = text.index(start)
+    return text[at:text.index(end, at + len(start))]
 
 
 def manual_checks(with_cover: bool) -> list[str]:
@@ -133,6 +145,34 @@ def binary_file_case() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def registry_case() -> None:
+    name = "第三步站外登记:配置放哪、没配置就跳过并说明,SKILL.md 步骤与报告、交付清单第三步都有这一项"
+    try:
+        ledger = WORK_LEDGER.read_text(encoding="utf-8")
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        section = between(ledger, "## 8. 站外登记", "## 9. 交付清单")
+        recommended, fallback = f"~/.config/{SKILL.name}/{REGISTRY_NAME}", f"references/{REGISTRY_NAME}"
+        problems = []
+        if not (f"推荐放 `{recommended}`" in section and fallback in section
+                and section.index(recommended) < section.index(fallback)
+                and fnmatch.fnmatch(f"skills/{SKILL.name}/{fallback}", GITIGNORE_RULE)):
+            problems.append("第 8 节没写清推荐位置在前、后备落在 .local.md 排除规则里")
+        if "两处都没有时跳过这一步" not in section or REGISTRY_SKIPPED not in section:
+            problems.append("第 8 节没写没有配置时跳过并在最终回复里说明")
+        if "同一次会话、当天" not in section or "纯插入" not in section:
+            problems.append("第 8 节没写同一次会话当天、纯插入")
+        third_step = between(skill, "### 第三步：只发布抖音、B站、YouTube", "### 第四步")
+        if "#8-站外登记" not in third_step or REGISTRY_SKIPPED not in third_step:
+            problems.append("SKILL.md 第三步步骤里没有站外登记或跳过说明")
+        for label, report in (("SKILL.md 第三步报告", between(skill, "第三步报告：", "第四步报告：")),
+                              ("交付清单第三步", between(ledger, "第三步最终回复至少列出：", "第四步最终回复"))):
+            if "站外登记是否已做" not in report or REGISTRY_SKIPPED not in report:
+                problems.append(f"{label}没有站外登记一项")
+        check(not problems, name, "; ".join(problems))
+    except Exception as exc:  # noqa: BLE001 - 锚点找不到也要记成具名 FAIL
+        check(False, name, f"{type(exc).__name__}: {exc}"[:200])
+
+
 def main() -> int:
     audio = json.loads(TEMPLATE.read_text(encoding="utf-8")).get("audio_defaults", {})
     wrong = {key: audio.get(key, "<缺>") for key, want in AUDIO_DEFAULTS.items() if key not in audio or audio[key] is not want}
@@ -160,6 +200,7 @@ def main() -> int:
     if gitignore.is_file():   # 装成插件后可能没有这个文件,有才核
         check(GITIGNORE_RULE in gitignore.read_text(encoding="utf-8").splitlines(),
               "仓库 .gitignore 排除了 references/ 下的 .local.md(禁用清单不进版本库)")
+    registry_case()
 
     if FAILURES:
         print(f"\n{len(FAILURES)} 项失败: " + "、".join(FAILURES))
