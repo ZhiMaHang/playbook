@@ -1,0 +1,3 @@
+interface:
+  display_name: "TDK 与页面要素"
+  short_description: "写改审标题、描述、H1、alt 和锚文本，批量做 TDK"

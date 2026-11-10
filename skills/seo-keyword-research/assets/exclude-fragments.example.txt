@@ -1,0 +1,28 @@
+# 剔除词片段示例：出现这些片段，多半不是本站要的需求。
+# 用法：node scripts/kw_table.mjs prep 候选词.csv --exclude 本站剔除词.txt
+# 规则：每个站各维护一份；每一条都要对照本站产品目录确认过才放进来。
+# 本站卖的东西不能进这张表（例如卖直通头的站，coupler 就不能列）。
+# 脚本只标「疑似剔除」，不删行；最后剔不剔由人按「卖不卖、意图对不对」定。
+# 不要把广告的否定词清单直接搬过来。
+#
+# 下面是电子连接器类站点的示例片段，换行业要整份重写。
+crimp
+crimping
+tool
+wiring diagram
+color code
+cable
+wall plate
+tester
+near me
+home depot
+amazon
+how to wire
+水晶头
+网线
+压线钳
+线序
+怎么接
+维修
+招聘
+工资

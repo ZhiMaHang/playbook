@@ -1,0 +1,40 @@
+# 禁用词清单示例，给 scripts/tdk_check.mjs 的 --banned 用。
+# 这只是常见类别的示意，不是任何一个站的口径。用之前按本站口径文件重写：
+# 口径允许的删掉，口径禁止而这里没有的补上。
+# 格式：一行一个词；「词 => 改法」可以附改法；# 开头是注释。
+# 拉丁文字按整词匹配（drop-in 不会命中 drop into），中文按子串匹配。
+# 已知的模板错拼（例如机器拼接留下的错字）也可以写进来，一起查。
+
+# 最高级与无法证明的比较
+best => 删掉，写可核对的事实（参数、资料、认证编号）
+leading => 删掉
+world-class => 删掉
+No. 1 => 删掉
+top-rated => 删掉
+领先 => 删掉
+第一 => 删掉
+最好 => 删掉
+
+# 替代与兼容打包票
+pin-to-pin => replacement candidate（替代候选，用样品验证）
+drop-in => replacement candidate
+direct replacement => replacement candidate
+fully compatible => 删掉，写比对过的参数
+100% compatible => 删掉
+完全兼容 => 替代候选型号，用样品验证
+直接替换 => 替代候选型号，用样品验证
+
+# 价格、起订量、库存
+best price => 删掉
+MOQ => 删掉（口径允许时照登记原句写）
+factory direct price => 删掉
+in stock => 删掉（没有实时库存数据时）
+
+# 身份夸大（按口径文件里本站真实的身份改）
+厂家直供 => 写我们提供什么
+源头厂家 => 写我们提供什么
+直接制造商 => 按口径文件写身份
+
+# 承诺（口径文件里登记过固定句的，照固定句写）
+Free samples => 照口径文件的样品固定句写
+24 小时发货 => 删掉

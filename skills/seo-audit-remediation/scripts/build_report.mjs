@@ -25,7 +25,7 @@ const renderReport = new Function(code + '\nreturn renderReport;')();
 const json = JSON.stringify(data, null, 2).replace(/</g, '\\u003c');
 let html = tpl.replace(/(<script type="application\/json" id="report-data">)[\s\S]*?(<\/script>)/, (m, a, b) => a + '\n' + json + '\n' + b);
 html = html.replace('<!--STATIC-->', () => renderReport(data));
-if (data.site) html = html.replace(/<title>[^<]*<\/title>/, () => '<title>' + String(data.site).replace(/[<&]/g, '') + ' SEO 评分</title>');
+if (data.site) html = html.replace(/<title>[^<]*<\/title>/, () => '<title>' + String(data.site).replace(/[<&]/g, '') + ' SEO 诊断</title>');
 
 fs.writeFileSync(outPath, html);
 process.stdout.write('已生成 ' + outPath + '\n');

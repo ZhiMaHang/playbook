@@ -1,0 +1,52 @@
+{
+  "_说明": "scripts/gsc_queries.mjs 的规则示例，按一个虚构的工业阀门英文站写的。用之前把 brand、spam、attributes 换成本站的写法，定下来以后写进站点档案，前后各期不要换。正则按 GSC 的默认行为：部分匹配、不区分大小写；GSC 用 RE2，不要用向前看、向后看和反向引用。intent 按顺序匹配，先命中的生效，所以细的规则放前面。没命中的标「未带意图修饰」，要看结果页再定。比较类词按比较对象分：比两类器件或技术的归信息 · 技术对比，比品牌或供应商的归商业 · 比较挑选，脚本分不出来，要人工改。",
+
+  "brand": "example\\s?valves|examplevalves",
+
+  "spam": [
+    "whatsapp|sales manager|trade agent"
+  ],
+
+  "machine": [
+    "^(site|inurl|intitle|cache):"
+  ],
+
+  "templateQuestion": [
+    "what factors (should i consider|affect).* when selecting",
+    "how do i compare different options for",
+    "what should i look for when selecting",
+    "what'?s the best option for"
+  ],
+
+  "longQuery": "^(\\S+\\s+){5}\\S+",
+
+  "intent": [
+    { "major": "商业", "minor": "替代查询", "re": "\\b(equivalent|alternatives?|replacement|replace|cross reference|substitute)\\b" },
+    { "major": "商业", "minor": "询价", "re": "\\b(price|prices|pricing|cost|quote|quotation)\\b" },
+    { "major": "商业", "minor": "现货与下单", "re": "\\b(buy|in stock|stock|order|shop)\\b" },
+    { "major": "商业", "minor": "样品", "re": "\\bsamples?\\b" },
+    { "major": "商业", "minor": "定制", "re": "\\b(custom|customized|oem|odm)\\b" },
+    { "major": "商业", "minor": "找厂家", "re": "\\b(manufacturers?|factory|factories|maker|producer)\\b" },
+    { "major": "商业", "minor": "找供应渠道", "re": "\\b(suppliers?|distributors?|vendors?|wholesale|wholesaler|dealer)\\b" },
+    { "major": "商业", "minor": "比较挑选", "re": "\\b(best|top \\d+|reviews?)\\b" },
+    { "major": "信息", "minor": "参数资料", "re": "datasheet|data sheet|pinout|footprint|pdf|\\bspecs?\\b|specification|dimensions|drawing|\\bcad\\b" },
+    { "major": "信息", "minor": "技术对比", "re": "\\b(vs\\.?|versus|difference between|compared to)\\b" },
+    { "major": "信息", "minor": "选型方法", "re": "\\b(how to choose|how to select|selection|choosing|sizing)\\b" },
+    { "major": "信息", "minor": "故障排查", "re": "\\b(troubleshoot\\w*|not working|failure|leaking|problems?)\\b" },
+    { "major": "信息", "minor": "标准法规", "re": "\\b(standards?|requirements?|api \\d+\\w*|iso \\d+|asme|en \\d+)\\b" },
+    { "major": "信息", "minor": "设计应用", "re": "\\b(schematic|layout|design|installation|install|diagram)\\b" },
+    { "major": "信息", "minor": "原理机制", "re": "\\b(how does|how do .+ work|how it works|working principle|why)\\b" },
+    { "major": "信息", "minor": "概念定义", "re": "\\b(what is|what are|meaning|definition|uses of)\\b" },
+    { "major": "信息", "minor": "行业资讯", "re": "\\b(market|trends?|forecast)\\b" },
+    { "major": "信息", "minor": "问句（待细分）", "re": "^(what|how|why|which|when|where|who|can|does|do|is|are|should)\\b" }
+  ],
+
+  "attributes": [
+    { "label": "品类", "re": "\\b(ball|gate|globe|check|butterfly|plug|needle) valves?\\b|\\bactuators?\\b" },
+    { "label": "型号", "re": "\\b[a-z]{1,4}-?\\d{3,}[a-z0-9-]*\\b" },
+    { "label": "参数规格", "re": "\\b(dn|pn)\\s?\\d+\\b|\\bclass \\d+\\b|\\d+(\\.\\d+)?\\s?(mm|inch|bar|psi|mpa)\\b|\\b(stainless|carbon steel|brass|ptfe|epdm|cryogenic|high pressure)\\b" },
+    { "label": "应用行业", "re": "\\b(oil and gas|lng|water treatment|chemical|marine|hvac|food grade)\\b" },
+    { "label": "标准认证", "re": "\\b(api|iso|asme|atex|fda|wras|ce)\\b" },
+    { "label": "地域", "re": "\\b(china|chinese|usa|india|germany|europe|european)\\b" }
+  ]
+}

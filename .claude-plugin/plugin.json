@@ -1,7 +1,7 @@
 {
   "name": "playbook",
-  "version": "0.14.0",
-  "description": "智码航工具集,全程零猜测。提示词三件套——prompt-optimizer:消歧→两道选择题→纯拼接,把一句模糊的话理成可直接发送的提示词;five-sentence-brief:按五句话把一件要办的事补全成任务简报;four-part-prompt:按目标/背景/输出要求/边界约束四段补全成结构化提示词。视频——digital-human-video:确认后调用火山·即梦AI 产出口播视频;digital-human-video-init:配置密钥并零成本验证;zmh-short-video-pipeline:按文案确认与音频、成片发布包、三平台发布完成三步主流程,画面优先用可溯源的实际画面,可按参考样片走实拍素材＋图卡路线,评论仅在明确要求时追加,视频号由用户发布,YouTube Shorts 使用独立 9:16 图片。营销——marketing:按 SEO/GEO/SEM 清单对营销站线上与源码双向核对,代码层能改的直接改,其余产出人工待办。SEO 评分整改——seo-audit-remediation:站点 SEO / GEO 评分与整改工作法,全站体检、按页面类型按谷歌/百度/AI 搜索口径严格打分、关键词布局、整改方案与文案、上线核对与复测,自带测量与报告脚本(Node 18+)。",
+  "version": "0.15.0",
+  "description": "智码航工具集,全程零猜测。提示词三件套——prompt-optimizer:消歧→两道选择题→纯拼接,把一句模糊的话理成可直接发送的提示词;five-sentence-brief:按五句话把一件要办的事补全成任务简报;four-part-prompt:按目标/背景/输出要求/边界约束四段补全成结构化提示词。视频——digital-human-video:确认后调用火山·即梦AI 产出口播视频;digital-human-video-init:配置密钥并零成本验证;zmh-short-video-pipeline:按文案确认与音频、成片发布包、三平台发布完成三步主流程,画面优先用可溯源的实际画面,可按参考样片走实拍素材＋图卡路线,评论仅在明确要求时追加,视频号由用户发布,YouTube Shorts 使用独立 9:16 图片。营销——marketing:按 SEO/GEO/SEM 清单对营销站线上与源码双向核对,代码层能改的直接改,其余产出人工待办。SEO 技能组六件(通用方法,不带站点数据,各站情况写进站点档案)——seo-keyword-research:找词、分意图、聚类打分,交付带来源的关键词表;seo-keyword-mapping:词定承接页、站点层级与内链、查处理抢词和重复页;seo-audit-remediation:全站或单页体检,P0–P3 定级,技术 SEO 与结构化数据整改,上线核对与同尺复测;seo-tdk-page-elements:写改审标题、描述、H1、alt、锚文本,批量 TDK 与低点击率诊断;seo-content-writing:按搜索意图写分类页、产品页和文章,证据可核对、说法合口径;seo-analytics-reporting:GSC/必应/百度/GA4 口径对账、涨跌诊断、周报月报 KPI、询盘归因与 AI 搜索监测。自带检查脚本需 Node 18+。",
   "author": {
     "name": "ZhiMaHang"
   },
